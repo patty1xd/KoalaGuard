@@ -43,7 +43,6 @@ public class KoalaGuard extends JavaPlugin {
         registerCheck(new FlyCheck(this));
         registerCheck(new JesusCheck(this));
         registerCheck(new VelocityCheck(this));
-        registerCheck(new ElytraBoostCheck(this));
         registerCheck(new PhaseCheck(this));
         registerCheck(new BurrowCheck(this));
 
