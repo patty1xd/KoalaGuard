@@ -23,15 +23,17 @@ public class AutoSmelterCheck extends Check {
     public void onExtract(FurnaceExtractEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
 
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
         long last = lastExtract.getOrDefault(uuid, 0L);
 
-        if (now - last < 50) { // extracting from multiple furnaces within 1 tick
+        // Very conservative to avoid FPs (server tick jitter):
+        if (now - last < 35) {
             int count = extractCount.merge(uuid, 1, Integer::sum);
-            if (count >= 5) {
+            if (count >= 7) {
                 flag(player, "rapid_extract count=" + count);
                 extractCount.put(uuid, 0);
             }

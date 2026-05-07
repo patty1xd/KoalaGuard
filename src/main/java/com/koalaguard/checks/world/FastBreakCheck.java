@@ -32,7 +32,8 @@ public class FastBreakCheck extends Check {
     public void onBreak(BlockBreakEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
         if (player.getGameMode() == GameMode.CREATIVE) return;
 
         UUID uuid = player.getUniqueId();
@@ -42,7 +43,8 @@ public class FastBreakCheck extends Check {
         long elapsed = System.currentTimeMillis() - start;
         long minBreak = estimateMinBreakTime(event.getBlock().getType(), player);
 
-        if (elapsed < minBreak * 0.4) {
+        // Conservative
+        if (elapsed < minBreak * 0.3) {
             flag(player, "elapsed=" + elapsed + "ms min=" + minBreak + "ms block=" + event.getBlock().getType());
         }
     }

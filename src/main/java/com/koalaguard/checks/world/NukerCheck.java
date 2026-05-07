@@ -24,7 +24,8 @@ public class NukerCheck extends Check {
     public void onBreak(BlockBreakEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
         if (player.getGameMode() == GameMode.CREATIVE) return;
 
         UUID uuid = player.getUniqueId();
@@ -43,13 +44,14 @@ public class NukerCheck extends Check {
         Location blockLoc = event.getBlock().getLocation();
         double dist = playerLoc.distance(blockLoc);
 
-        // Nuker: breaking blocks out of arm's reach, or breaking too many in 1 second
-        if (dist > 6.0) {
+        // Nuker: breaking blocks out of reasonable reach, or too many per second.
+        // Conservative reach threshold to reduce FPs with desync.
+        if (dist > 7.0) {
             flag(player, "break_dist=" + String.format("%.2f", dist));
         }
 
         // Breaking more than 10 blocks per second = nuker
-        if (count > 10) {
+        if (count > 14) {
             flag(player, "breaks_per_sec=" + count);
             breakCount.put(uuid, 0);
         }
