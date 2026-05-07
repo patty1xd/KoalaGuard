@@ -11,6 +11,28 @@ punishments:
   # If broadcast=false, who can still see punish messages (when enabled)
   broadcast-permission: "koalaguard.alerts"
 
+# Safety gates to avoid false bans under lag/ping/teleports/etc.
+safety:
+  # If false: any "ban" punishments are downgraded to kick.
+  allow-bans: false
+  # If ping is above this, checks will not flag.
+  max-ping-ms: 250
+  # If TPS (1m) is below this, checks will not flag.
+  min-tps: 18.0
+  # Prevent VL stacking spam from one burst of events.
+  flag-cooldown-ms: 750
+  # Grace windows where checks are suppressed.
+  teleport-grace-ms: 1500
+  velocity-grace-ms: 800
+  damage-grace-ms: 800
+  join-grace-ms: 2000
+  # When unstable and max VL reached: warn|kick
+  unstable-downgrade: "warn"
+
+discord:
+  # Put your Discord webhook URL here.
+  webhook-url: ""
+
 # KoalaGuard Configuration
 violation-decay: 1
 decay-interval: 60
