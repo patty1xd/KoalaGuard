@@ -24,6 +24,7 @@ public abstract class Check implements Listener {
      * Call this at the top of every event handler.
      */
     protected boolean isExempt(Player player) {
+        if (player == null) return true;
         if (player.hasPermission("koalaguard.bypass")) return true;
         GameMode gm = player.getGameMode();
         if (gm == GameMode.CREATIVE || gm == GameMode.SPECTATOR) return true;
@@ -33,6 +34,7 @@ public abstract class Check implements Listener {
     protected void flag(Player player, String detail) {
         if (!isEnabled()) return;
         if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
         plugin.getViolationManager().flag(player, checkName, detail);
     }
 
