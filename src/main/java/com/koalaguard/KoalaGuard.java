@@ -41,19 +41,11 @@ public class KoalaGuard extends JavaPlugin {
         // Movement
         registerCheck(new SpeedCheck(this));
         registerCheck(new FlyCheck(this));
-        registerCheck(new NoFallCheck(this));
-        registerCheck(new StepCheck(this));
         registerCheck(new JesusCheck(this));
         registerCheck(new VelocityCheck(this));
-        registerCheck(new SprintCheck(this));
-        registerCheck(new ScaffoldCheck(this));
-        registerCheck(new HighJumpCheck(this));
-        registerCheck(new LongJumpCheck(this));
         registerCheck(new ElytraBoostCheck(this));
-        registerCheck(new TridentBoostCheck(this));
         registerCheck(new PhaseCheck(this));
         registerCheck(new BurrowCheck(this));
-        registerCheck(new FastClimbCheck(this));
 
         // Combat
         registerCheck(new KillAuraCheck(this));
@@ -82,7 +74,6 @@ public class KoalaGuard extends JavaPlugin {
         // World
         registerCheck(new NukerCheck(this));
         registerCheck(new FastBreakCheck(this));
-        registerCheck(new VeinMinerCheck(this));
         registerCheck(new AutoSmelterCheck(this));
     }
 
