@@ -1,3 +1,16 @@
+messages:
+  prefix: "§c[KoalaGuard] §b"
+
+alerts:
+  permission: "koalaguard.alerts"
+  console: true
+
+punishments:
+  # If true, broadcasts punishments to everyone (noisy + leaks info)
+  broadcast: false
+  # If broadcast=false, who can still see punish messages (when enabled)
+  broadcast-permission: "koalaguard.alerts"
+
 # KoalaGuard Configuration
 violation-decay: 1
 decay-interval: 60
