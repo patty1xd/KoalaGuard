@@ -22,7 +22,8 @@ public class AutoEatCheck extends Check {
     public void onConsume(PlayerItemConsumeEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
 
         if (!event.getItem().getType().isEdible()) return;
 
@@ -30,13 +31,10 @@ public class AutoEatCheck extends Check {
         long now = System.currentTimeMillis();
         long last = lastEat.getOrDefault(uuid, 0L);
 
-        // AutoEat: eating while moving at speed, or eating when hunger is full
-        if (player.getFoodLevel() >= 19) {
-            flag(player, "ate_at_full_hunger=" + player.getFoodLevel());
-        }
+        // Don't flag for eating at full hunger (golden apples, gapples, etc. are legit).
 
-        // Eating too fast (food use time is ~32 ticks = 1.6s)
-        if (now - last < 1500 && last != 0) {
+        // Eating too fast (food use time is ~1.6s)
+        if (now - last < 1300 && last != 0) {
             flag(player, "eat_interval=" + (now - last) + "ms");
         }
 
