@@ -5,20 +5,32 @@ import com.koalaguard.checks.movement.*;
 import com.koalaguard.checks.player.*;
 import com.koalaguard.checks.world.*;
 import com.koalaguard.commands.KoalaGuardCommand;
+import com.koalaguard.listeners.PlayerStateListener;
+import com.koalaguard.logging.KoalaGuardLogs;
 import com.koalaguard.managers.BanManager;
 import com.koalaguard.managers.ViolationManager;
 import org.bukkit.plugin.java.JavaPlugin;
+import com.koalaguard.util.PlayerStateTracker;
+import com.koalaguard.util.ServerMetrics;
+import org.bukkit.entity.Player;
 
 public class KoalaGuard extends JavaPlugin {
 
     private static KoalaGuard instance;
     private ViolationManager violationManager;
     private BanManager banManager;
+    private ServerMetrics metrics;
+    private PlayerStateTracker playerState;
+    private KoalaGuardLogs logs;
 
     @Override
     public void onEnable() {
         instance = this;
         saveDefaultConfig();
+
+        metrics = new ServerMetrics();
+        playerState = new PlayerStateTracker();
+        logs = new KoalaGuardLogs(this);
 
         banManager = new BanManager(this);
         violationManager = new ViolationManager(this);
@@ -27,6 +39,7 @@ public class KoalaGuard extends JavaPlugin {
         registerCommands();
         getServer().getPluginManager().registerEvents(
                 new com.koalaguard.listeners.PlayerConnectionListener(this), this);
+        getServer().getPluginManager().registerEvents(new PlayerStateListener(this), this);
 
         getLogger().info("KoalaGuard enabled. Protecting the server.");
     }
@@ -89,4 +102,43 @@ public class KoalaGuard extends JavaPlugin {
     public static KoalaGuard getInstance() { return instance; }
     public ViolationManager getViolationManager() { return violationManager; }
     public BanManager getBanManager() { return banManager; }
+    public ServerMetrics getMetrics() { return metrics; }
+    public PlayerStateTracker getPlayerState() { return playerState; }
+    public KoalaGuardLogs getLogs() { return logs; }
+
+    public String getPrefix() {
+        return getConfig().getString("messages.prefix", "§c[KoalaGuard] §b");
+    }
+
+    public String getAlertPermission() {
+        return getConfig().getString("alerts.permission", "koalaguard.alerts");
+    }
+
+    /**
+     * Global anti-false-positive gate. Checks should not flag while:
+     * - TPS is low
+     * - ping is high
+     * - player recently teleported / got velocity / took damage / just joined
+     */
+    public boolean shouldSuppressFlags(Player player) {
+        if (player == null) return true;
+
+        double tps = metrics.tps1m();
+        double minTps = getConfig().getDouble("safety.min-tps", 18.0);
+        if (tps < minTps) return true;
+
+        int ping = metrics.pingMs(player);
+        int maxPing = getConfig().getInt("safety.max-ping-ms", 250);
+        if (ping >= 0 && ping >= maxPing) return true;
+
+        long tpWindow = getConfig().getLong("safety.teleport-grace-ms", 1500L);
+        long velWindow = getConfig().getLong("safety.velocity-grace-ms", 800L);
+        long dmgWindow = getConfig().getLong("safety.damage-grace-ms", 800L);
+        long joinWindow = getConfig().getLong("safety.join-grace-ms", 2000L);
+
+        if (playerState.recentlyTeleported(player, tpWindow)) return true;
+        if (playerState.recentlyHadVelocity(player, velWindow)) return true;
+        if (playerState.recentlyTookDamage(player, dmgWindow)) return true;
+        return playerState.recentlyJoined(player, joinWindow);
+    }
 }
