@@ -12,8 +12,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ViolationManager {
 
+    private static final String PREFIX = "§c[KoalaGuard] §b";
+
     private final KoalaGuard plugin;
-    // UUID -> checkName -> violation count
     private final Map<UUID, Map<String, Integer>> violations = new ConcurrentHashMap<>();
     private BukkitTask decayTask;
 
@@ -28,14 +29,12 @@ public class ViolationManager {
         UUID uuid = player.getUniqueId();
         violations.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
         int vl = violations.get(uuid).merge(checkName, 1, Integer::sum);
-
         int maxVl = plugin.getConfig().getInt("checks." + checkName.toLowerCase() + ".max-violations", 10);
 
-        // Staff alert
-        String alert = "§6§l[KoalaGuard Alert] §f" + player.getName()
-                + " §7failed §e" + checkName
-                + " §7(VL: §c" + vl + "§7/§c" + maxVl + "§7)"
-                + (detail != null && !detail.isEmpty() ? " §8[" + detail + "]" : "");
+        String alert = PREFIX + player.getName()
+                + " failed " + checkName
+                + " (VL: " + vl + "/" + maxVl + ")"
+                + (detail != null && !detail.isEmpty() ? " | " + detail : "");
 
         for (Player online : Bukkit.getOnlinePlayers()) {
             if (online.hasPermission("koalaguard.alerts")) {
@@ -43,14 +42,39 @@ public class ViolationManager {
             }
         }
 
-        plugin.getLogger().info("[Alert] " + player.getName() + " | " + checkName + " VL:" + vl + " " + (detail != null ? detail : ""));
+        plugin.getLogger().info("[Alert] " + player.getName() + " | " + checkName
+                + " VL:" + vl + (detail != null && !detail.isEmpty() ? " | " + detail : ""));
 
-        // Check ban threshold
         if (vl >= maxVl) {
-            String banDuration = plugin.getConfig().getString("checks." + checkName.toLowerCase() + ".ban-duration", "7d");
-            plugin.getBanManager().ban(player, checkName, banDuration);
+            String punishment = plugin.getConfig().getString(
+                    "checks." + checkName.toLowerCase() + ".punishment", "kick");
+            applyPunishment(player, checkName, punishment);
             violations.get(uuid).remove(checkName);
         }
+    }
+
+    private void applyPunishment(Player player, String checkName, String punishment) {
+        switch (punishment.toLowerCase()) {
+            case "ban" -> {
+                String duration = plugin.getConfig().getString(
+                        "checks." + checkName.toLowerCase() + ".ban-duration", "7d");
+                plugin.getBanManager().ban(player, checkName, duration);
+            }
+            case "kick" -> {
+                Bukkit.broadcastMessage(PREFIX + player.getName() + " was punished | Reason: " + checkName);
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (player.isOnline()) player.kickPlayer(
+                            "§c[KoalaGuard]\n§bYou were kicked for: §f" + checkName);
+                });
+            }
+            case "warn" -> {
+                player.sendMessage(PREFIX + "Warning: suspicious activity detected (" + checkName + ")");
+            }
+        }
+    }
+
+    public void flag(Player player, String checkName) {
+        flag(player, checkName, "");
     }
 
     public int getViolations(UUID uuid, String checkName) {
