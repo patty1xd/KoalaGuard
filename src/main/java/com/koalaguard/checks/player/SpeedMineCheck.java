@@ -52,7 +52,6 @@ public class SpeedMineCheck extends Check {
             case STONE, COBBLESTONE, STONE_BRICKS -> 1500;
             case OBSIDIAN -> 9000;
             case DIRT, GRAVEL, SAND -> 750;
-            case WOOD, OAK_LOG, BIRCH_LOG, SPRUCE_LOG, JUNGLE_LOG, ACACIA_LOG, DARK_OAK_LOG -> 1500;
             case IRON_ORE, DEEPSLATE_IRON_ORE -> 2250;
             case DIAMOND_ORE, DEEPSLATE_DIAMOND_ORE -> 2250;
             default -> 500;
