@@ -27,7 +27,8 @@ public class SpeedMineCheck extends Check {
     public void onBreak(BlockBreakEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
         if (player.getGameMode() == GameMode.CREATIVE) return;
 
         UUID uuid = player.getUniqueId();
@@ -40,7 +41,8 @@ public class SpeedMineCheck extends Check {
         // Estimate minimum break time for this block type
         long minBreakMs = estimateMinBreakTime(event.getBlock(), player);
 
-        if (now - last < minBreakMs * 0.5) { // allow 50% tolerance
+        // Conservative tolerance
+        if (now - last < minBreakMs * 0.35) {
             flag(player, "break_time=" + (now - last) + "ms min=" + minBreakMs + "ms block=" + event.getBlock().getType());
         }
     }

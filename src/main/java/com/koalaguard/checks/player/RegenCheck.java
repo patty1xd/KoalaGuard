@@ -24,8 +24,8 @@ public class RegenCheck extends Check {
     public void onRegen(EntityRegainHealthEvent event) {
         if (!isEnabled()) return;
         if (!(event.getEntity() instanceof Player player)) return;
-        if (player.hasPermission("koalaguard.bypass")) return;
-        if (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
 
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
@@ -33,7 +33,10 @@ public class RegenCheck extends Check {
 
         // Natural regen interval is 80 ticks (4s) at full hunger, min 10 ticks with regen effect
         boolean hasRegen = player.hasPotionEffect(PotionEffectType.REGENERATION);
-        long minInterval = hasRegen ? 400L : 3500L;
+        // conservative intervals (avoid false flags):
+        // - Regen effect can tick fast depending on amplifier/beacon/etc.
+        // - Natural regen depends on saturation/server settings.
+        long minInterval = hasRegen ? 250L : 2500L;
 
         if (event.getRegainReason() == EntityRegainHealthEvent.RegainReason.SATIATED
                 || event.getRegainReason() == EntityRegainHealthEvent.RegainReason.REGEN) {

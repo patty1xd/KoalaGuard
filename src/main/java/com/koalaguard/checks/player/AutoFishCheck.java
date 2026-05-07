@@ -22,7 +22,8 @@ public class AutoFishCheck extends Check {
     public void onFish(PlayerFishEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
 
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
@@ -33,9 +34,8 @@ public class AutoFishCheck extends Check {
             long bite = lastBite.getOrDefault(uuid, 0L);
             if (bite != 0) {
                 long reactionTime = now - bite;
-                // Human reaction to fish bite is typically 150-800ms
-                // AutoFish reacts in <100ms consistently
-                if (reactionTime < 100) {
+                // Conservative: only flag for extremely fast reaction
+                if (reactionTime < 60) {
                     flag(player, "reaction=" + reactionTime + "ms");
                 }
                 lastBite.remove(uuid);

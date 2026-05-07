@@ -23,7 +23,8 @@ public class AutoReplenishCheck extends Check {
     public void onHeldChange(PlayerItemHeldEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
 
         UUID uuid = player.getUniqueId();
         int prevSlot = event.getPreviousSlot();
@@ -36,7 +37,8 @@ public class AutoReplenishCheck extends Check {
         if (prevCount >= 0 && currCount > prevCount + 1) {
             long now = System.currentTimeMillis();
             long last = lastReplenish.getOrDefault(uuid, 0L);
-            if (now - last < 200) { // replenished very recently
+            // Conservative: only flag if this happens repeatedly in a very short window.
+            if (now - last < 120) {
                 flag(player, "replenish_jump=" + prevCount + "->" + currCount);
             }
             lastReplenish.put(uuid, now);

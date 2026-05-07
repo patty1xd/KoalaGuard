@@ -24,16 +24,18 @@ public class ExpThrowerCheck extends Check {
     public void onConsume(PlayerItemConsumeEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
         if (event.getItem().getType() != Material.EXPERIENCE_BOTTLE) return;
 
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
         long last = lastExpBottle.getOrDefault(uuid, 0L);
 
-        if (now - last < 100) {
+        // Conservative: only flag very rapid repeated use
+        if (now - last < 60) {
             int count = bottleCount.merge(uuid, 1, Integer::sum);
-            if (count >= 10) {
+            if (count >= 14) {
                 flag(player, "rapid_exp_bottle count=" + count);
                 bottleCount.put(uuid, 0);
             }

@@ -24,7 +24,8 @@ public class ChestSwapCheck extends Check {
     public void onInventoryClick(InventoryClickEvent event) {
         if (!isEnabled()) return;
         if (!(event.getWhoClicked() instanceof Player player)) return;
-        if (player.hasPermission("koalaguard.bypass")) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
         if (event.getSlotType() != InventoryType.SlotType.ARMOR) return;
 
         // Chest slot = slot 38 in player inventory
