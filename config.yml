@@ -1,0 +1,174 @@
+# KoalaGuard Configuration
+# violation-decay: violations removed per minute of clean play (per check)
+violation-decay: 1
+# decay-interval: how often (in seconds) decay is applied
+decay-interval: 60
+
+checks:
+  # MOVEMENT
+  speed:
+    enabled: true
+    max-violations: 15
+    ban-duration: 7d
+  fly:
+    enabled: true
+    max-violations: 10
+    ban-duration: 30d
+  nofall:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  step:
+    enabled: true
+    max-violations: 12
+    ban-duration: 7d
+  jesus:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  velocity:
+    enabled: true
+    max-violations: 12
+    ban-duration: 7d
+  sprint:
+    enabled: true
+    max-violations: 15
+    ban-duration: 7d
+  scaffold:
+    enabled: true
+    max-violations: 8
+    ban-duration: 30d
+  highjump:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  longjump:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  elytraboost:
+    enabled: true
+    max-violations: 10
+    ban-duration: 30d
+  tridentboost:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  phase:
+    enabled: true
+    max-violations: 8
+    ban-duration: 30d
+  burrow:
+    enabled: true
+    max-violations: 8
+    ban-duration: 30d
+  fastclimb:
+    enabled: true
+    max-violations: 12
+    ban-duration: 7d
+
+  # COMBAT
+  killaura:
+    enabled: true
+    max-violations: 8
+    ban-duration: permanent
+  autoclicker:
+    enabled: true
+    max-violations: 8
+    ban-duration: 7d
+    max-cps: 20
+  reach:
+    enabled: true
+    max-violations: 10
+    ban-duration: 30d
+    max-reach: 3.2
+  criticals:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  aimassist:
+    enabled: true
+    max-violations: 10
+    ban-duration: 30d
+  autototem:
+    enabled: true
+    max-violations: 8
+    ban-duration: 30d
+    min-swap-ticks: 2
+  autoarmor:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  autoweapon:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  offhand:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  bowaimbot:
+    enabled: true
+    max-violations: 10
+    ban-duration: 30d
+  surround:
+    enabled: true
+    max-violations: 8
+    ban-duration: 30d
+  selftrap:
+    enabled: true
+    max-violations: 8
+    ban-duration: 30d
+
+  # PLAYER
+  autoeat:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  autoreplenish:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  antihunger:
+    enabled: true
+    max-violations: 12
+    ban-duration: 7d
+  regen:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  autofish:
+    enabled: true
+    max-violations: 8
+    ban-duration: 7d
+  expthrower:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+  chestswap:
+    enabled: true
+    max-violations: 8
+    ban-duration: 30d
+    min-swap-ticks: 3
+  speedmine:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
+
+  # WORLD
+  nuker:
+    enabled: true
+    max-violations: 5
+    ban-duration: permanent
+  fastbreak:
+    enabled: true
+    max-violations: 8
+    ban-duration: 7d
+  veinminer:
+    enabled: true
+    max-violations: 8
+    ban-duration: 7d
+  autosmelter:
+    enabled: true
+    max-violations: 10
+    ban-duration: 7d
