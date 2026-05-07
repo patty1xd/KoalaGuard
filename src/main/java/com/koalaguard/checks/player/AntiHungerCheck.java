@@ -23,8 +23,8 @@ public class AntiHungerCheck extends Check {
     public void onMove(PlayerMoveEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (player.hasPermission("koalaguard.bypass")) return;
-        if (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR) return;
+        if (isExempt(player)) return;
+        if (plugin.shouldSuppressFlags(player)) return;
 
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
@@ -38,8 +38,8 @@ public class AntiHungerCheck extends Check {
         int currFood = player.getFoodLevel();
         lastFoodLevel.put(uuid, currFood);
 
-        // If they've been sprinting/active for 30s but food hasn't decreased at all
-        if (prevFood == 20 && currFood == 20 && player.isSprinting()) {
+        // Extremely conservative: only flag if they are sprinting AND jumping (more hunger drain)
+        if (prevFood == 20 && currFood == 20 && player.isSprinting() && !player.isOnGround()) {
             flag(player, "food_unchanged_while_sprinting");
         }
     }
