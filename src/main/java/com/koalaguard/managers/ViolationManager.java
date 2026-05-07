@@ -1,6 +1,7 @@
 package com.koalaguard.managers;
 
 import com.koalaguard.KoalaGuard;
+import com.koalaguard.logging.DiscordWebhookNotifier;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
@@ -15,6 +16,7 @@ public class ViolationManager {
   private static final String DEFAULT_PREFIX = "§c[KoalaGuard] §b";
 
   private final KoalaGuard plugin;
+  private final DiscordWebhookNotifier discordNotifier;
 
   // uuid -> (checkName -> vl)
   private final Map<UUID, Map<String, Integer>> violations = new ConcurrentHashMap<>();
@@ -23,6 +25,7 @@ public class ViolationManager {
 
   public ViolationManager(KoalaGuard plugin) {
     this.plugin = plugin;
+    this.discordNotifier = new DiscordWebhookNotifier(plugin);
     startDecayTask();
   }
 
@@ -71,12 +74,27 @@ public class ViolationManager {
                   + (detail != null && !detail.isBlank() ? " | " + detail : ""));
     }
 
+    // Send to Discord webhook
+    String discordMsg = "**[KoalaGuard Alert]**\n"
+        + "Player: `" + player.getName() + "`\n"
+        + "Check: `" + checkName + "`\n"
+        + "Violations: `" + vl + "/" + maxVl + "`"
+        + (detail != null && !detail.isBlank() ? "\nDetails: " + detail : "");
+    discordNotifier.send(discordMsg);
+
     if (vl >= maxVl) {
       final String punishment =
           plugin.getConfig().getString("checks." + checkKey + ".punishment", "kick");
       applyPunishment(player, checkName, punishment);
 
-      // reset only this check’s VL
+      // Send punishment notification to Discord
+      String punishMsg = "**[KoalaGuard Punishment]**\n"
+          + "Player: `" + player.getName() + "`\n"
+          + "Check: `" + checkName + "`\n"
+          + "Action: `" + punishment + "`";
+      discordNotifier.send(punishMsg);
+
+      // reset only this check's VL
       perPlayer.remove(checkKey);
       if (perPlayer.isEmpty()) violations.remove(uuid);
     }
