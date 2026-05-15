@@ -19,13 +19,19 @@ public class ReachCheck extends Check {
         if (plugin.shouldSuppressFlags(player)) return;
 
         double maxReach = plugin.getConfig().getDouble("checks.reach.max-reach", 3.2);
-        // Add ping compensation buffer
-        int ping = plugin.getMetrics().pingMs(player);
-        double buffer = 0.35 + (ping > 0 ? Math.min(0.65, ping / 300.0) : 0.0);
 
-        double dist = player.getLocation().distance(event.getEntity().getLocation());
-        if (dist > maxReach + buffer) {
-            flag(player, "dist=" + String.format("%.2f", dist) + " max=" + maxReach);
+        // Ping-proportional buffer: higher ping = larger allowed window
+        // This is the most important false-positive fix for reach.
+        int ping = plugin.getMetrics().pingMs(player);
+        double pingBuffer = 0.4 + (ping > 0 ? Math.min(1.0, ping / 200.0) : 0.0);
+
+        // Measure eye-to-hitbox-center distance (more accurate than feet-to-feet)
+        double dist = player.getEyeLocation().distance(
+                event.getEntity().getLocation().add(0, event.getEntity().getHeight() / 2.0, 0)
+        );
+
+        if (dist > maxReach + pingBuffer) {
+            flag(player, String.format("dist=%.2f max=%.2f ping=%dms", dist, maxReach, ping));
         }
     }
 }
