@@ -71,7 +71,7 @@ public class CriticalsCheck extends Check {
 
         // Environments where crits are impossible (server rejects them)
         if (player.isInWater() || player.isInLava()) return;
-        if (player.isOnClimbable()) return;
+        if (player.isClimbing()) return;
         if (player.isInsideVehicle()) return;
         if (player.isGliding()) return;
 
@@ -131,4 +131,5 @@ public class CriticalsCheck extends Check {
         AttributeInstance attr = player.getAttribute(Attribute.ATTACK_DAMAGE);
         return attr != null ? attr.getValue() : 1.0;
     }
+
 }
