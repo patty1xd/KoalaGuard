@@ -6,242 +6,272 @@ alerts:
   console: true
 
 punishments:
-  # If true, broadcasts punishments to everyone (noisy + leaks info)
   broadcast: false
-  # If broadcast=false, who can still see punish messages (when enabled)
   broadcast-permission: "koalaguard.alerts"
 
-# Safety gates to avoid false bans under lag/ping/teleports/etc.
+# ─────────────────────────────────────────────
+# Safety gates — reduce false positives
+# ─────────────────────────────────────────────
 safety:
-  # If false: any "ban" punishments are downgraded to kick.
+  # Bans are OFF by default. Set to true only when you trust your threshold tuning.
   allow-bans: false
-  # If ping is above this, checks will not flag.
-  max-ping-ms: 250
-  # If TPS (1m) is below this, checks will not flag.
-  min-tps: 18.0
-  # Prevent VL stacking spam from one burst of events.
+  # Checks will not flag if player ping exceeds this (ms).
+  max-ping-ms: 300
+  # Checks will not flag if server TPS drops below this.
+  min-tps: 17.5
+  # Minimum time between successive flags for the same check (prevents burst VL).
   flag-cooldown-ms: 750
-  # Grace windows where checks are suppressed.
+  # Grace windows (ms) — checks are suppressed after these events.
   teleport-grace-ms: 1500
   velocity-grace-ms: 800
-  damage-grace-ms: 800
-  join-grace-ms: 2000
-  # When unstable and max VL reached: warn|kick
+  damage-grace-ms: 600
+  join-grace-ms: 3000
+  respawn-grace-ms: 2000
+  # Downgrade punishment when server is unstable: warn | kick
   unstable-downgrade: "warn"
 
+# ─────────────────────────────────────────────
+# Discord Bot
+# ─────────────────────────────────────────────
+# HOW TO SET UP:
+#   1. Go to https://discord.com/developers/applications
+#   2. Create a new application → Bot → copy the TOKEN
+#   3. Enable "Message Content Intent" in Bot settings
+#   4. Invite the bot: OAuth2 → URL Generator → bot scope → "Send Messages"
+#   5. Right-click the target channel → Copy Channel ID (enable Developer Mode first)
+#   6. Paste values below, then /kg reload
 discord:
-  # Put your Discord webhook URL here.
-  webhook-url: ""
+  bot-token: ""
+  alert-channel-id: ""
 
-# KoalaGuard Configuration
+# ─────────────────────────────────────────────
+# Violation decay
+# ─────────────────────────────────────────────
 violation-decay: 1
 decay-interval: 60
 
-# punishment options: kick | ban | warn
-# ban-duration only used when punishment: ban
-
+# ─────────────────────────────────────────────
+# Checks
+# punishment: warn | kick | ban
+# ban-duration: e.g. 7d, 24h, 30m, permanent
+# ─────────────────────────────────────────────
 checks:
-  # MOVEMENT
+
+  # ── MOVEMENT ──────────────────────────────
   speed:
     enabled: true
     max-violations: 15
     punishment: kick
     ban-duration: 7d
+
   fly:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 30d
-  nofall:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-  step:
-    enabled: true
-    max-violations: 12
-    punishment: kick
-    ban-duration: 7d
+
   jesus:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   velocity:
     enabled: true
     max-violations: 12
     punishment: kick
     ban-duration: 7d
-  sprint:
-    enabled: true
-    max-violations: 15
-    punishment: kick
-    ban-duration: 7d
-  scaffold:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-  highjump:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-  longjump:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-  elytraboost:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 30d
-  tridentboost:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
+
   phase:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 30d
+
   burrow:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 30d
-  fastclimb:
+
+  # Timer hack — sending extra movement packets
+  timer:
     enabled: true
-    max-violations: 12
+    max-violations: 10
     punishment: kick
     ban-duration: 7d
 
-  # COMBAT
+  # Auto-scaffold bridging
+  scaffold:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    max-place-rate: 10       # max blocks placed per second
+    max-air-placements: 3    # max consecutive block places while in air
+
+  # ── COMBAT ────────────────────────────────
   killaura:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: permanent
+
   autoclicker:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 7d
     max-cps: 20
+
   reach:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 30d
     max-reach: 3.2
+
   criticals:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   aimassist:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 30d
+
   autototem:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 30d
     min-swap-ticks: 2
+
   autoarmor:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   autoweapon:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   offhand:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   bowaimbot:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 30d
+
   surround:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 30d
+
   selftrap:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 30d
 
-  # PLAYER
+  # TBot (TriggerBot) — auto-attacks the instant an enemy enters hit range
+  tbot:
+    enabled: true
+    max-violations: 6
+    punishment: kick
+    ban-duration: permanent
+    min-streak: 3   # how many consecutive entry-hits before flagging
+
+  # Hitbox expander — enlarged enemy hitboxes for easier/longer hits
+  hitbox:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 30d
+
+  # NoWeb / Web bypass — moving or attacking at full speed inside cobwebs
+  webaura:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 7d
+    max-attacks-in-web: 5  # max hits allowed in a 2-second cobweb window
+
+  # ── PLAYER ────────────────────────────────
   autoeat:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   autoreplenish:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   antihunger:
     enabled: true
     max-violations: 12
     punishment: kick
     ban-duration: 7d
+
   regen:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   autofish:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 7d
+
   expthrower:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
+
   chestswap:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 30d
     min-swap-ticks: 3
+
   speedmine:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 7d
 
-  # WORLD
+  # ── WORLD ─────────────────────────────────
   nuker:
     enabled: true
     max-violations: 5
     punishment: kick
     ban-duration: permanent
+
   fastbreak:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 7d
-  veinminer:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 7d
+
   autosmelter:
     enabled: true
     max-violations: 10

@@ -2,18 +2,18 @@ name: KoalaGuard
 version: '${project.version}'
 main: com.koalaguard.KoalaGuard
 api-version: '1.21'
-description: Advanced anticheat plugin
+description: Advanced anticheat plugin for Paper 1.21
 authors: [ ]
 
 permissions:
   koalaguard.alerts:
-    description: Receive anticheat violation alerts
+    description: Receive anticheat violation alerts in-game
     default: op
   koalaguard.bypass:
     description: Bypass all anticheat checks
     default: false
   koalaguard.admin:
-    description: Access admin commands
+    description: Access all KoalaGuard admin commands
     default: op
 
 commands:
@@ -21,4 +21,4 @@ commands:
     description: KoalaGuard admin command
     aliases: [kg]
     permission: koalaguard.admin
-    usage: /koalaguard <reload|bans|unban|violations>
+    usage: /koalaguard <reload|bans|unban|violations|discord>
