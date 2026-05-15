@@ -8,17 +8,34 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.util.Vector;
 
 import java.util.*;
 
+/**
+ * Detects Meteor KillAura.
+ *
+ * From Meteor's source code:
+ *   - KillAura attacks on TickEvent.Pre — every game tick, not on player clicks.
+ *   - Default custom delay: 11 ticks (550 ms). Standard mode: full weapon cooldown.
+ *   - Rotation mode "Always": rotates toward target body every tick.
+ *   - Attacks are mechanically perfect — the player never misses the cooldown window.
+ *   - Multi-target: can hit up to 5 targets per tick with maxTargets setting.
+ *
+ * Server-observable signatures:
+ *   A) Attack timing consistency — real players have natural click variance;
+ *      KillAura attacks at suspiciously uniform intervals (low variance).
+ *   B) Multi-target hits — hitting 4+ distinct entities within 500 ms.
+ *   C) Angle: target is significantly behind/off-center of the player.
+ *   D) Snap rotation: huge yaw change immediately before a hit.
+ */
 public class KillAuraCheck extends Check {
 
-    private final Map<UUID, Float>       lastYaw      = new HashMap<>();
-    private final Map<UUID, Float>       lastPitch    = new HashMap<>();
-    private final Map<UUID, Long>        lastHitTime  = new HashMap<>();
-    private final Map<UUID, List<Float>> yawHistory   = new HashMap<>();
+    private final Map<UUID, Float>       lastYaw         = new HashMap<>();
+    private final Map<UUID, Long>        lastHitMs       = new HashMap<>();
+    private final Map<UUID, List<Long>>  hitIntervals    = new HashMap<>();
 
-    // Multi-target tracking: how many distinct entities hit in a short window
+    // Multi-target tracking
     private final Map<UUID, Set<UUID>>   recentTargets   = new HashMap<>();
     private final Map<UUID, Long>        targetWindowStart = new HashMap<>();
 
@@ -28,83 +45,85 @@ public class KillAuraCheck extends Check {
     public void onDamage(EntityDamageByEntityEvent event) {
         if (!isEnabled()) return;
         if (!(event.getDamager() instanceof Player player)) return;
+        if (!(event.getEntity() instanceof LivingEntity target)) return;
         if (isExempt(player)) return;
         if (plugin.shouldSuppressFlags(player)) return;
-        if (!(event.getEntity() instanceof LivingEntity target)) return;
-        // Only flag PvP scenarios (hitting other entities, not mobs)
-        // Allow all LivingEntities for full kill-aura detection
 
         UUID uuid = player.getUniqueId();
-        long now = System.currentTimeMillis();
+        long now  = System.currentTimeMillis();
+        int  ping = plugin.getMetrics().pingMs(player);
 
-        float currentYaw   = player.getLocation().getYaw();
-        float currentPitch = player.getLocation().getPitch();
-        float prevYaw      = lastYaw.getOrDefault(uuid, currentYaw);
-        long  lastHit      = lastHitTime.getOrDefault(uuid, 0L);
-        long  timeDiff     = now - lastHit;
+        float currYaw  = player.getLocation().getYaw();
+        float prevYaw  = lastYaw.getOrDefault(uuid, currYaw);
+        long  lastHit  = lastHitMs.getOrDefault(uuid, 0L);
+        long  interval = now - lastHit;
 
-        // --- Check A: Snap aim (huge yaw delta right before a hit) ---
-        float yawDelta = Math.abs(currentYaw - prevYaw);
+        // ── Check A: Snap rotation ──────────────────────────────────────────
+        float yawDelta = Math.abs(currYaw - prevYaw);
         if (yawDelta > 180) yawDelta = 360 - yawDelta;
-
-        // Ping compensation: allow extra time for snap under lag
-        int   ping      = plugin.getMetrics().pingMs(player);
-        long  snapWindow = 80 + (ping > 0 ? Math.min(100L, ping / 3L) : 0L);
-        if (yawDelta > 120 && timeDiff < snapWindow) {
-            flag(player, "snap yaw=" + String.format("%.1f", yawDelta) + " t=" + timeDiff + "ms");
+        long snapWindow = 80 + (ping > 0 ? Math.min(100L, ping / 3L) : 0L);
+        if (yawDelta > 120 && interval < snapWindow) {
+            flag(player, "snap yaw=" + String.format("%.1f", yawDelta) + " t=" + interval + "ms");
         }
 
-        // --- Check B: Hitting entity that is NOT in front of the player ---
-        double angle = getAngleTo(player, target);
-        // 160° is very conservative — only catches blatant 180° behind-you hits
-        if (angle > 160) {
-            flag(player, "behind angle=" + String.format("%.1f", angle));
-        }
+        // ── Check B: Attack interval consistency ───────────────────────────
+        // Meteor's default: 11-tick hit delay = 550 ms, or vanilla cooldown ~600 ms.
+        // Real players deviate by ±80–200 ms. KillAura deviates by <20 ms.
+        if (interval > 100 && interval < 3000) { // only meaningful intervals
+            List<Long> intervals = hitIntervals.computeIfAbsent(uuid, k -> new ArrayList<>());
+            intervals.add(interval);
+            if (intervals.size() > 15) intervals.remove(0);
 
-        // --- Check C: Suspiciously low yaw-variance over last 25 hits ---
-        List<Float> history = yawHistory.computeIfAbsent(uuid, k -> new ArrayList<>());
-        history.add(yawDelta);
-        if (history.size() > 25) history.remove(0);
-        if (history.size() == 25) {
-            double variance = computeVariance(history);
-            double mean     = history.stream().mapToDouble(Float::doubleValue).average().orElse(0);
-            // Real players show high variance; killaura produces near-zero variance
-            if (variance < 0.15 && mean < 2.0) {
-                flag(player, "low_yaw_var=" + String.format("%.4f", variance));
+            if (intervals.size() == 15) {
+                double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0);
+                double variance = intervals.stream()
+                        .mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0);
+                // Real players: variance > 2000. KillAura: variance < 300.
+                // Mean between 300–700 ms = weapon cooldown zone.
+                if (variance < 300 && mean > 300 && mean < 800) {
+                    flag(player, String.format("consistent_timing mean=%.0fms var=%.0f", mean, variance));
+                    intervals.clear();
+                }
             }
         }
 
-        // --- Check D: Multi-target aura (hitting 3+ distinct entities within 500ms) ---
+        // ── Check C: Target behind / off-center ────────────────────────────
+        double angle = horizontalAngleTo(player, target);
+        if (angle > 155) {
+            flag(player, "behind angle=" + String.format("%.1f", angle));
+        }
+
+        // ── Check D: Multi-target (maxTargets > 1 in Meteor) ───────────────
         long windowMs = 500L + (ping > 0 ? Math.min(200L, ping) : 0L);
         long wStart   = targetWindowStart.getOrDefault(uuid, now);
         if (now - wStart > windowMs) {
             recentTargets.remove(uuid);
             targetWindowStart.put(uuid, now);
         }
-        Set<UUID> targets = recentTargets.computeIfAbsent(uuid, k -> new HashSet<>());
-        targets.add(target.getUniqueId());
-        if (targets.size() >= 4) {
-            flag(player, "multi_target=" + targets.size() + " in " + (now - wStart) + "ms");
+        recentTargets.computeIfAbsent(uuid, k -> new HashSet<>()).add(target.getUniqueId());
+        if (recentTargets.get(uuid).size() >= 4) {
+            flag(player, "multi_target=" + recentTargets.get(uuid).size());
             recentTargets.remove(uuid);
             targetWindowStart.put(uuid, now);
         }
 
-        lastYaw.put(uuid, currentYaw);
-        lastPitch.put(uuid, currentPitch);
-        lastHitTime.put(uuid, now);
+        lastYaw.put(uuid, currYaw);
+        lastHitMs.put(uuid, now);
     }
 
-    private static double getAngleTo(Player player, Entity target) {
-        var dir      = player.getLocation().getDirection().normalize();
-        var toTarget = target.getLocation().toVector()
-                .add(new org.bukkit.util.Vector(0, 0.9, 0)) // aim at torso
-                .subtract(player.getEyeLocation().toVector()).normalize();
-        double dot = dir.dot(toTarget);
-        return Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, dot))));
-    }
+    private static double horizontalAngleTo(Player player, Entity target) {
+        Vector look = player.getLocation().getDirection();
+        look.setY(0);
+        if (look.lengthSquared() < 1e-6) return 0;
+        look.normalize();
 
-    private static double computeVariance(List<Float> values) {
-        double mean = values.stream().mapToDouble(Float::doubleValue).average().orElse(0);
-        return values.stream().mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0);
+        Vector toTarget = target.getLocation().toVector()
+                .subtract(player.getLocation().toVector());
+        toTarget.setY(0);
+        if (toTarget.lengthSquared() < 1e-6) return 0;
+        toTarget.normalize();
+
+        double dot = Math.max(-1, Math.min(1, look.dot(toTarget)));
+        return Math.toDegrees(Math.acos(dot));
     }
 }

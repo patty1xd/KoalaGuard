@@ -7,17 +7,35 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityResurrectEvent;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Detects Meteor AutoTotem.
+ *
+ * From Meteor's source code:
+ *   - Listens for ClientboundEntityEventPacket with PROTECTED_FROM_DEATH (= totem consumed).
+ *   - Default delay: 0 ticks. Immediately calls InvUtils.move() to offhand on the NEXT tick.
+ *   - Server-side: offhand changes to a new totem within 0–1 ticks (0–50 ms) of resurrect.
+ *
+ * Detection:
+ *   After EntityResurrectEvent fires, schedule a check 1 tick later.
+ *   If the offhand slot is now a TOTEM_OF_UNDYING (and wasn't before),
+ *   the swap happened in ≤1 tick — impossible for a human.
+ *   Require 2 consecutive instances before flagging.
+ *
+ * Human realistic: 200–500 ms to notice the totem was consumed and manually re-equip.
+ * With AutoTotem default delay=0: re-equip happens the very next server tick (≤50 ms).
+ */
 public class AutoTotemCheck extends Check {
 
-    private final Map<UUID, Long> lastTotemUse = new HashMap<>();
-    private final Map<UUID, Long> lastOffhandSwap = new HashMap<>();
+    // Timestamp of the resurrect event per player
+    private final Map<UUID, Long>    resurrectMs = new HashMap<>();
+    // How many times they've re-equipped suspiciously fast
+    private final Map<UUID, Integer> fastSwapStreak = new HashMap<>();
 
     public AutoTotemCheck(KoalaGuard plugin) { super(plugin, "autototem"); }
 
@@ -25,34 +43,43 @@ public class AutoTotemCheck extends Check {
     public void onResurrect(EntityResurrectEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
         if (isExempt(player)) return;
-        lastTotemUse.put(player.getUniqueId(), System.currentTimeMillis());
+
+        UUID uuid = player.getUniqueId();
+        resurrectMs.put(uuid, System.currentTimeMillis());
+
+        // Check offhand 1 tick and 3 ticks later (covers delay=0 and delay=1/2)
+        plugin.getServer().getScheduler().runTaskLater(plugin,
+                () -> checkOffhand(player, uuid), 1L);
+        plugin.getServer().getScheduler().runTaskLater(plugin,
+                () -> checkOffhand(player, uuid), 3L);
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent event) {
+    private void checkOffhand(Player player, UUID uuid) {
+        if (!player.isOnline()) return;
         if (!isEnabled()) return;
-        if (!(event.getWhoClicked() instanceof Player player)) return;
         if (isExempt(player)) return;
         if (plugin.shouldSuppressFlags(player)) return;
 
-        ItemStack cursor = event.getCursor();
-        ItemStack current = event.getCurrentItem();
+        Long resMs = resurrectMs.get(uuid);
+        if (resMs == null) return;
 
-        boolean movingTotem = (cursor != null && cursor.getType() == Material.TOTEM_OF_UNDYING)
-                || (current != null && current.getType() == Material.TOTEM_OF_UNDYING);
-        if (!movingTotem) return;
+        long elapsed = System.currentTimeMillis() - resMs;
 
-        UUID uuid = player.getUniqueId();
-        long now = System.currentTimeMillis();
-        long lastUse = lastTotemUse.getOrDefault(uuid, 0L);
+        ItemStack offhand = player.getInventory().getItemInOffHand();
+        if (offhand.getType() != Material.TOTEM_OF_UNDYING) return;
 
-        // If totem was used very recently and they're swapping a new one in
-        int minTicks = plugin.getConfig().getInt("checks.autototem.min-swap-ticks", 2);
-        long minMs = minTicks * 50L;
-
-        // Conservative: only flag if it's unrealistically fast
-        if (now - lastUse > 0 && now - lastUse < minMs) {
-            flag(player, "swap_after=" + (now - lastUse) + "ms");
+        // They have a totem in offhand already — how fast was it?
+        // Human minimum realistic re-equip: ~200 ms
+        if (elapsed < 150) {
+            int streak = fastSwapStreak.merge(uuid, 1, Integer::sum);
+            if (streak >= 2) {
+                flag(player, "totem_reequip elapsed=" + elapsed + "ms streak=" + streak);
+                fastSwapStreak.put(uuid, 0);
+            }
+            resurrectMs.remove(uuid); // consumed, don't double-flag
+        } else {
+            fastSwapStreak.put(uuid, 0);
+            resurrectMs.remove(uuid);
         }
     }
 }
