@@ -14,6 +14,22 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Detects Meteor Flight.
+ *
+ * From Meteor's source (Flight.java):
+ *   - "Vanilla" mode: repeatedly cancels fall velocity, keeping player airborne.
+ *   - "Creative" mode: sets fly flag server-side (detected by allowFlight, skipped here).
+ *   - Server-observable: player remains at constant or increasing Y for > 2 seconds
+ *     with no legitimate explanation.
+ *
+ * Detection:
+ *   Count consecutive move events where the player is NOT on the ground.
+ *   Require sustained upward or level flight (dy >= -0.08 per tick) for
+ *   > 30 ticks (1.5 s) before flagging.
+ *   -0.08 is the terminal velocity of a player in free-fall after 1 tick,
+ *   so values above this mean the player is NOT naturally falling.
+ */
 public class FlyCheck extends Check {
 
     private final Map<UUID, Integer> airTicks = new HashMap<>();
@@ -28,42 +44,41 @@ public class FlyCheck extends Check {
         if (plugin.shouldSuppressFlags(player)) return;
         if (event.getTo() == null) return;
 
-        // Hard exemptions
         if (player.getAllowFlight() || player.isFlying()) return;
         if (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR) return;
-        if (player.isGliding() || player.isInsideVehicle()) return;
-        if (player.isRiptiding()) return;
+        if (player.isGliding() || player.isInsideVehicle() || player.isRiptiding()) return;
+        if (player.isInWater() || player.isInLava()) { airTicks.remove(player.getUniqueId()); return; }
 
-        // Potion exemptions
         if (player.hasPotionEffect(PotionEffectType.LEVITATION)) return;
-        if (player.hasPotionEffect(PotionEffectType.JUMP_BOOST)) return;
         if (player.hasPotionEffect(PotionEffectType.SLOW_FALLING)) return;
 
-        // State exemptions
-        if (plugin.getPlayerState().recentlySlimeBounced(player, 800)) return;
-        if (plugin.getPlayerState().recentlyUsedRiptide(player, 1500)) return;
-        if (plugin.getPlayerState().recentlyInBubbleColumn(player, 1000)) return;
-        if (plugin.getPlayerState().recentlyLandedFromElytra(player, 1000)) return;
+        if (plugin.getPlayerState().recentlySlimeBounced(player, 1200)) return;
+        if (plugin.getPlayerState().recentlyUsedRiptide(player, 2000)) return;
+        if (plugin.getPlayerState().recentlyInBubbleColumn(player, 1200)) return;
+        if (plugin.getPlayerState().recentlyLandedFromElytra(player, 1500)) return;
 
-        // Check if player is in/on water or lava (swimming/floating is not fly)
-        if (player.isInWater() || player.isInLava()) {
-            airTicks.remove(player.getUniqueId());
-            return;
-        }
-
-        // Check if block below is a non-solid that still "holds" the player (like
-        // fences, stairs, snow, etc.)
         boolean onGround = isOnGround(player, event);
-
         UUID uuid = player.getUniqueId();
-        if (!onGround) {
-            int ticks = airTicks.merge(uuid, 1, Integer::sum);
-            double dy  = event.getTo().getY() - event.getFrom().getY();
 
-            // Only flag sustained upward movement (not just a normal jump arc)
-            // 40 ticks = 2 seconds of continuous upward drift
-            if (ticks > 40 && dy >= 0.02) {
-                flag(player, "airTicks=" + ticks + " dy=" + String.format("%.3f", dy));
+        if (!onGround) {
+            double dy = event.getTo().getY() - event.getFrom().getY();
+
+            // Natural gravity: dy decreases by ~0.08 each tick
+            // If dy > -0.08 the player is resisting gravity → possible fly
+            // (This also catches players hovering at constant Y)
+            if (dy >= -0.09) {
+                int ticks = airTicks.merge(uuid, 1, Integer::sum);
+                // Allow Jump Boost: it adds ~0.1 per amp level to jump height
+                if (player.hasPotionEffect(PotionEffectType.JUMP_BOOST)) {
+                    return; // generous exemption — jump boost extends airtime
+                }
+                if (ticks > 30 && dy >= -0.04) {
+                    flag(player, "air_ticks=" + ticks + " dy=" + String.format("%.3f", dy));
+                    airTicks.put(uuid, 20); // reset to mid-value, don't spam flags
+                }
+            } else {
+                // Falling at natural speed — not fly
+                airTicks.merge(uuid, 1, Integer::sum); // still in air, but naturally
             }
         } else {
             airTicks.remove(uuid);
@@ -72,16 +87,12 @@ public class FlyCheck extends Check {
 
     private boolean isOnGround(Player player, PlayerMoveEvent event) {
         if (player.isOnGround()) return true;
-
-        // Server-side ground check for common "holding" blocks
-        org.bukkit.Location loc = event.getTo();
-        if (loc == null) return false;
-
-        Material below = loc.getBlock().getRelative(0, -1, 0).getType();
+        org.bukkit.Location to = event.getTo();
+        if (to == null) return false;
+        // Server-side solid block below
+        Material below = to.getBlock().getRelative(0, -1, 0).getType();
         if (below.isSolid()) return true;
-
-        // Slabs, stairs, etc. (non-solid but walkable)
-        Material atFeet = loc.getBlock().getType();
-        return atFeet.isSolid();
+        // At-feet block (slabs, stairs, etc.)
+        return to.getBlock().getType().isSolid();
     }
 }
