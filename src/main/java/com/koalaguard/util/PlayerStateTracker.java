@@ -9,70 +9,84 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class PlayerStateTracker {
 
-  private final Map<UUID, Long> lastJoinMs = new ConcurrentHashMap<>();
-  private final Map<UUID, Long> lastTeleportMs = new ConcurrentHashMap<>();
-  private final Map<UUID, Long> lastVelocityMs = new ConcurrentHashMap<>();
-  private final Map<UUID, Vector> lastVelocity = new ConcurrentHashMap<>();
-  private final Map<UUID, Long> lastDamageTakenMs = new ConcurrentHashMap<>();
+    // --- Existing states ---
+    private final Map<UUID, Long> lastJoinMs        = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastTeleportMs    = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastVelocityMs    = new ConcurrentHashMap<>();
+    private final Map<UUID, Vector> lastVelocity    = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastDamageTakenMs = new ConcurrentHashMap<>();
 
-  public void onJoin(Player player) {
-    if (player == null) return;
-    lastJoinMs.put(player.getUniqueId(), System.currentTimeMillis());
-  }
+    // --- New states for reduced false positives ---
+    private final Map<UUID, Long> lastRespawnMs       = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastElytraLandMs    = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastRiptideMs       = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastBubbleColumnMs  = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastSlimeBounceMs   = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastGameModeChangeMs = new ConcurrentHashMap<>();
 
-  public void onTeleport(Player player) {
-    if (player == null) return;
-    lastTeleportMs.put(player.getUniqueId(), System.currentTimeMillis());
-  }
+    // --- Events ---
 
-  public void onVelocity(Player player, Vector velocity) {
-    if (player == null) return;
-    UUID uuid = player.getUniqueId();
-    lastVelocityMs.put(uuid, System.currentTimeMillis());
-    if (velocity != null) lastVelocity.put(uuid, velocity.clone());
-  }
+    public void onJoin(Player p)          { stamp(lastJoinMs, p); }
+    public void onTeleport(Player p)      { stamp(lastTeleportMs, p); }
+    public void onDamageTaken(Player p)   { stamp(lastDamageTakenMs, p); }
+    public void onRespawn(Player p)       { stamp(lastRespawnMs, p); }
+    public void onElytraLand(Player p)    { stamp(lastElytraLandMs, p); }
+    public void onRiptide(Player p)       { stamp(lastRiptideMs, p); }
+    public void onBubbleColumn(Player p)  { stamp(lastBubbleColumnMs, p); }
+    public void onSlimeBounce(Player p)   { stamp(lastSlimeBounceMs, p); }
+    public void onGameModeChange(Player p){ stamp(lastGameModeChangeMs, p); }
 
-  public void onDamageTaken(Player player) {
-    if (player == null) return;
-    lastDamageTakenMs.put(player.getUniqueId(), System.currentTimeMillis());
-  }
+    public void onVelocity(Player p, Vector velocity) {
+        if (p == null) return;
+        UUID id = p.getUniqueId();
+        lastVelocityMs.put(id, System.currentTimeMillis());
+        if (velocity != null) lastVelocity.put(id, velocity.clone());
+    }
 
-  public boolean recentlyJoined(Player player, long windowMs) {
-    return within(lastJoinMs, player, windowMs);
-  }
+    // --- Queries ---
 
-  public boolean recentlyTeleported(Player player, long windowMs) {
-    return within(lastTeleportMs, player, windowMs);
-  }
+    public boolean recentlyJoined(Player p, long windowMs)         { return within(lastJoinMs, p, windowMs); }
+    public boolean recentlyTeleported(Player p, long windowMs)     { return within(lastTeleportMs, p, windowMs); }
+    public boolean recentlyHadVelocity(Player p, long windowMs)    { return within(lastVelocityMs, p, windowMs); }
+    public boolean recentlyTookDamage(Player p, long windowMs)     { return within(lastDamageTakenMs, p, windowMs); }
+    public boolean recentlyRespawned(Player p, long windowMs)      { return within(lastRespawnMs, p, windowMs); }
+    public boolean recentlyLandedFromElytra(Player p, long windowMs){ return within(lastElytraLandMs, p, windowMs); }
+    public boolean recentlyUsedRiptide(Player p, long windowMs)    { return within(lastRiptideMs, p, windowMs); }
+    public boolean recentlyInBubbleColumn(Player p, long windowMs) { return within(lastBubbleColumnMs, p, windowMs); }
+    public boolean recentlySlimeBounced(Player p, long windowMs)   { return within(lastSlimeBounceMs, p, windowMs); }
+    public boolean recentlyChangedGameMode(Player p, long windowMs){ return within(lastGameModeChangeMs, p, windowMs); }
 
-  public boolean recentlyHadVelocity(Player player, long windowMs) {
-    return within(lastVelocityMs, player, windowMs);
-  }
+    public Vector getLastVelocity(Player p) {
+        if (p == null) return null;
+        Vector v = lastVelocity.get(p.getUniqueId());
+        return v == null ? null : v.clone();
+    }
 
-  public boolean recentlyTookDamage(Player player, long windowMs) {
-    return within(lastDamageTakenMs, player, windowMs);
-  }
+    public void clear(UUID uuid) {
+        if (uuid == null) return;
+        lastJoinMs.remove(uuid);
+        lastTeleportMs.remove(uuid);
+        lastVelocityMs.remove(uuid);
+        lastVelocity.remove(uuid);
+        lastDamageTakenMs.remove(uuid);
+        lastRespawnMs.remove(uuid);
+        lastElytraLandMs.remove(uuid);
+        lastRiptideMs.remove(uuid);
+        lastBubbleColumnMs.remove(uuid);
+        lastSlimeBounceMs.remove(uuid);
+        lastGameModeChangeMs.remove(uuid);
+    }
 
-  public Vector getLastVelocity(Player player) {
-    if (player == null) return null;
-    Vector v = lastVelocity.get(player.getUniqueId());
-    return v == null ? null : v.clone();
-  }
+    // --- Helpers ---
 
-  public void clear(UUID uuid) {
-    if (uuid == null) return;
-    lastJoinMs.remove(uuid);
-    lastTeleportMs.remove(uuid);
-    lastVelocityMs.remove(uuid);
-    lastVelocity.remove(uuid);
-    lastDamageTakenMs.remove(uuid);
-  }
+    private static void stamp(Map<UUID, Long> map, Player p) {
+        if (p == null) return;
+        map.put(p.getUniqueId(), System.currentTimeMillis());
+    }
 
-  private static boolean within(Map<UUID, Long> map, Player player, long windowMs) {
-    if (player == null) return false;
-    Long t = map.get(player.getUniqueId());
-    if (t == null) return false;
-    return System.currentTimeMillis() - t <= windowMs;
-  }
+    private static boolean within(Map<UUID, Long> map, Player p, long windowMs) {
+        if (p == null) return false;
+        Long t = map.get(p.getUniqueId());
+        return t != null && System.currentTimeMillis() - t <= windowMs;
+    }
 }
-
