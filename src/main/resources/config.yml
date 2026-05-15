@@ -101,6 +101,27 @@ checks:
     punishment: kick
     ban-duration: 7d
 
+  # NoFall — prevents fall damage via fake onGround packet
+  nofall:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 7d
+
+  # NoSlow — moves at full speed while eating, charging bow, or blocking
+  noslow:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 7d
+
+  # Step — steps up full 1-block heights without jumping
+  step:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 7d
+
   # Auto-scaffold bridging
   scaffold:
     enabled: true
@@ -209,6 +230,13 @@ checks:
     ban-duration: 7d
     max-attacks-in-web: 5  # max hits allowed in a 2-second cobweb window
 
+  # CrystalAura — auto place+detonate end crystals every tick
+  crystalaura:
+    enabled: true
+    max-violations: 5
+    punishment: kick
+    ban-duration: permanent
+
   # ── PLAYER ────────────────────────────────
   autoeat:
     enabled: true
@@ -256,6 +284,13 @@ checks:
   speedmine:
     enabled: true
     max-violations: 10
+    punishment: kick
+    ban-duration: 7d
+
+  # Meteor AirPlace — placing blocks against air (no block face clicked)
+  airplace:
+    enabled: true
+    max-violations: 6
     punishment: kick
     ban-duration: 7d
 
