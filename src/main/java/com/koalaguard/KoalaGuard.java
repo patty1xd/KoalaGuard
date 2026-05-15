@@ -68,6 +68,9 @@ public class KoalaGuard extends JavaPlugin {
         register(new BurrowCheck(this));
         register(new TimerCheck(this));
         register(new ScaffoldCheck(this));
+        register(new NoFallCheck(this));
+        register(new NoSlowCheck(this));
+        register(new StepCheck(this));
 
         // Combat
         register(new KillAuraCheck(this));
@@ -85,6 +88,7 @@ public class KoalaGuard extends JavaPlugin {
         register(new TBotCheck(this));
         register(new HitboxCheck(this));
         register(new WebAuraCheck(this));
+        register(new CrystalAuraCheck(this));
 
         // Player
         register(new AutoEatCheck(this));
@@ -95,6 +99,7 @@ public class KoalaGuard extends JavaPlugin {
         register(new ExpThrowerCheck(this));
         register(new ChestSwapCheck(this));
         register(new SpeedMineCheck(this));
+        register(new AirPlaceCheck(this));
 
         // World
         register(new NukerCheck(this));
