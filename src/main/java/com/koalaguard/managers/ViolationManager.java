@@ -1,7 +1,6 @@
 package com.koalaguard.managers;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.logging.DiscordWebhookNotifier;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
@@ -13,19 +12,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ViolationManager {
 
-  private static final String DEFAULT_PREFIX = "§c[KoalaGuard] §b";
-
   private final KoalaGuard plugin;
-  private final DiscordWebhookNotifier discordNotifier;
 
   // uuid -> (checkName -> vl)
   private final Map<UUID, Map<String, Integer>> violations = new ConcurrentHashMap<>();
+  // uuid -> (check -> lastFlagMs) prevents burst stacking
+  private final Map<UUID, Map<String, Long>> lastFlagMs = new ConcurrentHashMap<>();
 
   private BukkitTask decayTask;
 
   public ViolationManager(KoalaGuard plugin) {
     this.plugin = plugin;
-    this.discordNotifier = new DiscordWebhookNotifier(plugin);
     startDecayTask();
   }
 
@@ -36,15 +33,26 @@ public class ViolationManager {
     final String checkKey = checkName.toLowerCase();
     final UUID uuid = player.getUniqueId();
 
+    // cooldown to reduce false VL stacking
+    final long now = System.currentTimeMillis();
+    final long cooldownMs = plugin.getConfig().getLong("safety.flag-cooldown-ms", 750L);
+    final Map<String, Long> cooldowns = lastFlagMs.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
+    final long last = cooldowns.getOrDefault(checkKey, 0L);
+    if (now - last < cooldownMs) return;
+    cooldowns.put(checkKey, now);
+
     final Map<String, Integer> perPlayer =
         violations.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
 
     final int vl = perPlayer.merge(checkKey, 1, Integer::sum);
     final int maxVl = plugin.getConfig().getInt("checks." + checkKey + ".max-violations", 10);
 
-    final String prefix = plugin.getConfig().getString("messages.prefix", DEFAULT_PREFIX);
-    final String alertPerm = plugin.getConfig().getString("alerts.permission", "koalaguard.alerts");
+    final String prefix = plugin.getPrefix();
+    final String alertPerm = plugin.getAlertPermission();
     final boolean consoleAlerts = plugin.getConfig().getBoolean("alerts.console", true);
+
+    final int ping = plugin.getMetrics().pingMs(player);
+    final double tps = plugin.getMetrics().tps1m();
 
     final String msg =
         prefix
@@ -56,11 +64,16 @@ public class ViolationManager {
             + "/"
             + maxVl
             + ")"
+            + " | ping="
+            + ping
+            + "ms tps="
+            + String.format("%.2f", tps)
             + (detail != null && !detail.isBlank() ? " | " + detail : "");
 
     for (Player online : Bukkit.getOnlinePlayers()) {
       if (online.hasPermission(alertPerm)) online.sendMessage(msg);
     }
+    plugin.getLogs().alert(msg);
     if (consoleAlerts) {
       plugin
           .getLogger()
@@ -74,27 +87,12 @@ public class ViolationManager {
                   + (detail != null && !detail.isBlank() ? " | " + detail : ""));
     }
 
-    // Send to Discord webhook
-    String discordMsg = "**[KoalaGuard Alert]**\n"
-        + "Player: `" + player.getName() + "`\n"
-        + "Check: `" + checkName + "`\n"
-        + "Violations: `" + vl + "/" + maxVl + "`"
-        + (detail != null && !detail.isBlank() ? "\nDetails: " + detail : "");
-    discordNotifier.send(discordMsg);
-
     if (vl >= maxVl) {
       final String punishment =
           plugin.getConfig().getString("checks." + checkKey + ".punishment", "kick");
-      applyPunishment(player, checkName, punishment);
+      applyPunishment(player, checkName, punishment, ping, tps);
 
-      // Send punishment notification to Discord
-      String punishMsg = "**[KoalaGuard Punishment]**\n"
-          + "Player: `" + player.getName() + "`\n"
-          + "Check: `" + checkName + "`\n"
-          + "Action: `" + punishment + "`";
-      discordNotifier.send(punishMsg);
-
-      // reset only this check's VL
+      // reset only this check’s VL
       perPlayer.remove(checkKey);
       if (perPlayer.isEmpty()) violations.remove(uuid);
     }
@@ -120,21 +118,38 @@ public class ViolationManager {
   public void clearPlayer(UUID uuid) {
     if (uuid == null) return;
     violations.remove(uuid);
+    lastFlagMs.remove(uuid);
   }
 
-  private void applyPunishment(Player player, String checkName, String punishment) {
-    final String prefix = plugin.getConfig().getString("messages.prefix", DEFAULT_PREFIX);
+  private void applyPunishment(Player player, String checkName, String punishment, int ping, double tps) {
+    final String prefix = plugin.getPrefix();
     final boolean broadcastPunishments = plugin.getConfig().getBoolean("punishments.broadcast", false);
     final String broadcastPerm =
         plugin.getConfig().getString("punishments.broadcast-permission", "koalaguard.alerts");
 
-    switch (punishment == null ? "kick" : punishment.toLowerCase()) {
+    // "no false bans" default: bans disabled unless explicitly enabled
+    boolean allowBans = plugin.getConfig().getBoolean("safety.allow-bans", false);
+    int maxPing = plugin.getConfig().getInt("safety.max-ping-ms", 250);
+    double minTps = plugin.getConfig().getDouble("safety.min-tps", 18.0);
+    boolean unstable = (ping >= 0 && ping >= maxPing) || (tps < minTps);
+
+    String p = punishment == null ? "kick" : punishment.toLowerCase();
+    if (unstable) p = plugin.getConfig().getString("safety.unstable-downgrade", "warn").toLowerCase();
+    if (p.equals("ban") && !allowBans) p = "kick";
+
+    switch (p) {
       case "ban" -> {
         String duration =
             plugin.getConfig().getString("checks." + checkName.toLowerCase() + ".ban-duration", "7d");
         plugin.getBanManager().ban(player, checkName, duration);
+        plugin.getLogs().punishment(prefix + player.getName() + " banned for " + checkName
+            + " | ping=" + ping + "ms tps=" + String.format("%.2f", tps));
       }
-      case "warn" -> player.sendMessage(prefix + "Warning: suspicious activity detected (" + checkName + ")");
+      case "warn" -> {
+        player.sendMessage(prefix + "Warning: suspicious activity detected (" + checkName + ")");
+        plugin.getLogs().punishment(prefix + player.getName() + " warned for " + checkName
+            + " | ping=" + ping + "ms tps=" + String.format("%.2f", tps));
+      }
       case "kick" -> {
         if (broadcastPunishments) {
           for (Player online : Bukkit.getOnlinePlayers()) {
@@ -152,6 +167,8 @@ public class ViolationManager {
                     player.kickPlayer("§c[KoalaGuard]\n§bYou were kicked for: §f" + checkName);
                   }
                 });
+        plugin.getLogs().punishment(prefix + player.getName() + " kicked for " + checkName
+            + " | ping=" + ping + "ms tps=" + String.format("%.2f", tps));
       }
       default -> {
         // unknown punishment -> do nothing (safe default)
