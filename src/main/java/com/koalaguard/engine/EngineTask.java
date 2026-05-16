@@ -131,9 +131,11 @@ public final class EngineTask extends BukkitRunnable {
 
         double h = player.isSneaking() ? 1.5 : 1.8;
         f.simGround = CollisionEngine.supported(player.getWorld(), x, y, z, h);
+        boolean near = CollisionEngine.nearGround(player.getWorld(), x, y, z, h);
         f.groundSlipperiness = CollisionEngine.slipperiness(player.getWorld(), x, y, z);
         f.insideSolid = CollisionEngine.insideSolid(player.getWorld(), x, y, z, h);
-        boolean ground = f.simGround || p.onGround;
+        // Client onGround is only trusted when server geometry corroborates it.
+        boolean ground = f.simGround || (p.onGround && near);
 
         s.pushFrame(f);
         s.pushRotation(yaw, pitch);
@@ -151,8 +153,7 @@ public final class EngineTask extends BukkitRunnable {
                     plugin.getLogger().warning("Check " + c.getName() + " error: " + t);
                 }
             }
-            plugin.getSetbackManager().markValid(d, player,
-                    ground || CollisionEngine.nearGround(player.getWorld(), x, y, z, h));
+            plugin.getSetbackManager().markValid(d, player, f.simGround || near);
             if (d.setbackPending) {
                 s.intake.clear();
                 return true;
@@ -216,20 +217,20 @@ public final class EngineTask extends BukkitRunnable {
         int newMainCount = pi.getItemInMainHand().getAmount();
         Material newCursor = player.getItemOnCursor().getType();
 
-        boolean offWasTotem  = inv.offHand == Material.TOTEM_OF_UNDYING;
-        boolean mainWasTotem = inv.mainHand == Material.TOTEM_OF_UNDYING;
+        boolean offWasTotem = inv.offHand == Material.TOTEM_OF_UNDYING;
 
         if (newMain != inv.mainHand) inv.mainHandChangedTick = s.tick;
         if (newOff  != inv.offHand)  inv.offHandChangedTick  = s.tick;
 
-        // Totem consumed out of a hand → arm the transition validator.
-        boolean offConsumed  = offWasTotem  && newOff  != Material.TOTEM_OF_UNDYING;
-        boolean mainConsumed = mainWasTotem && newMain != Material.TOTEM_OF_UNDYING;
-        // Or a single totem in a stack was eaten (count dropped, still totem).
+        // AutoTotem is purely an OFF-HAND re-equip vector, so we only arm on a
+        // true off-hand totem CONSUME (TOTEM -> non-totem). Main-hand totems and
+        // off-hand stack decrements (TOTEM -> TOTEM, count--) are NOT a cycle —
+        // this is what makes "carrying two totems / a stack" impossible to FP.
+        boolean offConsumed = offWasTotem && newOff != Material.TOTEM_OF_UNDYING;
         boolean offDecremented = offWasTotem && newOff == Material.TOTEM_OF_UNDYING
                 && newOffCount < inv.offHandCount;
 
-        if ((offConsumed || mainConsumed) && !offDecremented) {
+        if (offConsumed && !offDecremented) {
             inv.totemConsumedTick = s.tick;
             inv.awaitingTotemTransition = true;
         }
