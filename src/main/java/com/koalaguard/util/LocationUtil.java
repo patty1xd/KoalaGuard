@@ -91,4 +91,34 @@ public final class LocationUtil {
         double dot = Math.max(-1.0, Math.min(1.0, look.dot(to)));
         return Math.toDegrees(Math.acos(dot));
     }
+
+    // ───────── packet-accurate variants (use the client's real yaw/pitch) ─────────
+
+    public static Vector direction(float yaw, float pitch) {
+        double y = Math.toRadians(yaw), p = Math.toRadians(pitch);
+        double xz = Math.cos(p);
+        return new Vector(-xz * Math.sin(y), -Math.sin(p), xz * Math.cos(y));
+    }
+
+    /** 3D angle (deg) between the client's real look vector and the line to the victim's hitbox centre. */
+    public static double lookAngle(double ex, double ey, double ez, float yaw, float pitch, Entity victim) {
+        Vector look = direction(yaw, pitch);
+        Location v = victim.getLocation();
+        Vector to = new Vector(v.getX() - ex, (v.getY() + victim.getHeight() / 2.0) - ey, v.getZ() - ez);
+        if (to.lengthSquared() < 1.0E-7) return 0;
+        to.normalize();
+        double dot = Math.max(-1.0, Math.min(1.0, look.dot(to)));
+        return Math.toDegrees(Math.acos(dot));
+    }
+
+    /** Eye(packet) → nearest point of the victim AABB. */
+    public static double reachDistance(double ex, double ey, double ez, Entity victim) {
+        Location v = victim.getLocation();
+        double w = victim.getWidth() / 2.0;
+        double h = victim.getHeight();
+        double dx = clampComponent(ex, v.getX() - w, v.getX() + w) - ex;
+        double dy = clampComponent(ey, v.getY(), v.getY() + h) - ey;
+        double dz = clampComponent(ez, v.getZ() - w, v.getZ() + w) - ez;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
 }
