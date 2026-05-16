@@ -41,6 +41,9 @@ public final class MovementTask extends BukkitRunnable {
                 continue;
             }
 
+            // Mid-lagback: don't evaluate physics on a position in flux.
+            if (d.setbackPending) { last[0] = sx; last[1] = sy; last[2] = sz; continue; }
+
             // ── rotation model (packet-accurate) ──
             d.lastYaw = d.yaw; d.lastPitch = d.pitch;
             d.yaw = syaw; d.pitch = spitch;
@@ -93,6 +96,9 @@ public final class MovementTask extends BukkitRunnable {
                     plugin.getLogger().warning("Check " + check.getName() + " error: " + t);
                 }
             }
+
+            // Advance the lagback anchor only on a supported, accepted position.
+            plugin.getSetbackManager().markValid(d, player, d.onGround || d.nearGround);
         }
     }
 

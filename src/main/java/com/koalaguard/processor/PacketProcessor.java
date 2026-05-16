@@ -13,6 +13,7 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientIn
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPluginMessage;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPong;
 import com.koalaguard.KoalaGuard;
 import com.koalaguard.data.PlayerData;
 
@@ -51,6 +52,7 @@ public final class PacketProcessor extends PacketListenerAbstract {
                 || type == PacketType.Play.Client.PLAYER_ROTATION
                 || type == PacketType.Play.Client.PLAYER_POSITION_AND_ROTATION) {
             WrapperPlayClientPlayerFlying w = new WrapperPlayClientPlayerFlying(event);
+            d.flyingPacketCount++;
             d.flyingTimes.addLast(now);
             while (!d.flyingTimes.isEmpty() && now - d.flyingTimes.peekFirst() > 4000) d.flyingTimes.pollFirst();
             d.pOnGround = w.isOnGround();
@@ -126,6 +128,12 @@ public final class PacketProcessor extends PacketListenerAbstract {
 
         if (type == PacketType.Play.Client.CLICK_WINDOW) {
             d.lastClickWindowMs = now;
+            return;
+        }
+
+        if (type == PacketType.Play.Client.PONG) {
+            WrapperPlayClientPong pong = new WrapperPlayClientPong(event);
+            plugin.getTransactionManager().onPong(uuid, pong.getId());
             return;
         }
 
