@@ -56,16 +56,22 @@ public final class PacketProcessor extends PacketListenerAbstract {
             d.flyingTimes.addLast(now);
             while (!d.flyingTimes.isEmpty() && now - d.flyingTimes.peekFirst() > 4000) d.flyingTimes.pollFirst();
             d.pOnGround = w.isOnGround();
-            if (w.hasPositionChanged()) {
-                var pos = w.getLocation().getPosition();
-                d.pX = pos.getX(); d.pY = pos.getY(); d.pZ = pos.getZ();
-                d.pHasPos = true;
-            }
             if (w.hasRotationChanged()) {
                 float yaw = w.getLocation().getYaw();
                 float pitch = w.getLocation().getPitch();
                 d.pYaw = yaw; d.pPitch = pitch; d.pHasRot = true;
                 d.pushRotation(yaw, pitch);
+            }
+            if (w.hasPositionChanged()) {
+                var pos = w.getLocation().getPosition();
+                d.pX = pos.getX(); d.pY = pos.getY(); d.pZ = pos.getZ();
+                d.pHasPos = true;
+                // One frame == one client movement tick (no server-tick aliasing).
+                if (d.moveQueue.size() < 100) {
+                    d.moveQueue.add(new double[]{
+                            pos.getX(), pos.getY(), pos.getZ(),
+                            d.pYaw, d.pPitch, w.isOnGround() ? 1.0 : 0.0});
+                }
             }
             return;
         }
