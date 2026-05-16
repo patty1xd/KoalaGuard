@@ -11,15 +11,17 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 
 /**
- * Runs once per server tick on the main thread. It rebuilds the movement
- * model from the latest packet-accurate position/rotation captured by
- * {@link PacketProcessor}, then drives every movement check. Because the
- * positions come from the client's own packets (not lossy Bukkit move
- * events) Speed/Timer/Fly/NoSlow are both accurate and FP-resistant.
+ * Drains the per-packet move queue every server tick and replays each frame
+ * as ONE client movement tick. This is the critical correctness fix: deltas
+ * are computed packet-to-packet (exactly how the client integrates physics),
+ * never sampled at the server-tick boundary — so a tick with no move packet
+ * is not a phantom "0 motion" (Fly FP) and a tick with two packets is not a
+ * phantom "2× speed" (Speed FP). Same approach Grim/Vulcan use.
  */
 public final class MovementTask extends BukkitRunnable {
 
     private final KoalaGuard plugin;
+    private static final int MAX_FRAMES_PER_TICK = 22;
 
     public MovementTask(KoalaGuard plugin) {
         this.plugin = plugin;
@@ -29,52 +31,18 @@ public final class MovementTask extends BukkitRunnable {
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             PlayerData d = plugin.getDataManager().get(player);
-            if (d == null || !d.pHasPos) continue;
+            if (d == null) continue;
 
-            double sx = d.pX, sy = d.pY, sz = d.pZ;
-            float syaw = d.pYaw, spitch = d.pPitch;
-
-            double[] last = d.obj("mv$last");
-            if (last == null) {
-                d.setObj("mv$last", new double[]{sx, sy, sz});
-                d.lastYaw = syaw; d.lastPitch = spitch;
+            if (d.setbackPending) {           // mid-lagback: discard in-flight frames
+                d.moveQueue.clear();
+                d.moveInit = false;
                 continue;
             }
 
-            // Mid-lagback: don't evaluate physics on a position in flux.
-            if (d.setbackPending) { last[0] = sx; last[1] = sy; last[2] = sz; continue; }
+            boolean spectatorish = player.getGameMode() == GameMode.CREATIVE
+                    || player.getGameMode() == GameMode.SPECTATOR;
 
-            // ── rotation model (packet-accurate) ──
-            d.lastYaw = d.yaw; d.lastPitch = d.pitch;
-            d.yaw = syaw; d.pitch = spitch;
-            d.lastDeltaYaw = d.deltaYaw; d.lastDeltaPitch = d.deltaPitch;
-            d.deltaYaw = Math.abs(MathUtil.wrapAngle(d.yaw - d.lastYaw));
-            d.deltaPitch = Math.abs(d.pitch - d.lastPitch);
-            if (d.deltaYaw > 0.0001f || d.deltaPitch > 0.0001f) {
-                push(d.yawSamples, d.deltaYaw);
-                push(d.pitchSamples, d.deltaPitch);
-                d.rotationChanged = true;
-            } else d.rotationChanged = false;
-
-            // ── positional model ──
-            d.lastDeltaX = d.deltaX; d.lastDeltaY = d.deltaY; d.lastDeltaZ = d.deltaZ;
-            d.lastDeltaXZ = d.deltaXZ;
-            d.deltaX = sx - last[0];
-            d.deltaY = sy - last[1];
-            d.deltaZ = sz - last[2];
-            d.deltaXZ = Math.hypot(d.deltaX, d.deltaZ);
-            d.accelerationXZ = d.deltaXZ - d.lastDeltaXZ;
-            d.positionChanged = Math.abs(d.deltaX) > 1e-6 || Math.abs(d.deltaY) > 1e-6 || Math.abs(d.deltaZ) > 1e-6;
-
-            d.lastOnGround = d.onGround;
-            d.clientGround = d.pOnGround;
-            d.serverGround = LocationUtil.isOnGround(player);
-            d.onGround = d.clientGround || d.serverGround;
-            d.nearGround = d.serverGround;
-            if (d.onGround) { d.groundTicks++; d.airTicks = 0; d.sinceGroundTicks = 0; }
-            else { d.airTicks++; d.groundTicks = 0; d.sinceGroundTicks++; }
-
-            // ── environment flags ──
+            // environment flags (current state is fine — doesn't change sub-tick)
             d.exemptFlying = player.isFlying() || player.getAllowFlight();
             d.exemptVehicle = player.isInsideVehicle();
             d.exemptGliding = player.isGliding();
@@ -84,26 +52,67 @@ public final class MovementTask extends BukkitRunnable {
             d.exemptLevitation = player.hasPotionEffect(PotionEffectType.LEVITATION);
             d.exemptSlowFalling = player.hasPotionEffect(PotionEffectType.SLOW_FALLING);
 
-            last[0] = sx; last[1] = sy; last[2] = sz;
+            int processed = 0;
+            double[] f;
+            while ((f = d.moveQueue.poll()) != null) {
+                if (++processed > MAX_FRAMES_PER_TICK) { d.moveQueue.clear(); break; }
 
-            if (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR)
-                continue;
+                double x = f[0], y = f[1], z = f[2];
+                float yaw = (float) f[3], pitch = (float) f[4];
+                boolean cg = f[5] == 1.0;
 
-            for (MovementCheck check : plugin.getCheckManager().movement()) {
-                try {
-                    if (check.isEnabled()) check.handle(d, player);
-                } catch (Throwable t) {
-                    plugin.getLogger().warning("Check " + check.getName() + " error: " + t);
+                if (!d.moveInit) {
+                    d.prevX = x; d.prevY = y; d.prevZ = z;
+                    d.prevYaw = yaw; d.prevPitch = pitch;
+                    d.moveInit = true;
+                    continue;
                 }
+
+                double dx = x - d.prevX, dy = y - d.prevY, dz = z - d.prevZ;
+
+                // ungraced teleport / world move — reset baseline, don't evaluate
+                if (Math.abs(dx) > 8 || Math.abs(dy) > 8 || Math.abs(dz) > 8) {
+                    d.prevX = x; d.prevY = y; d.prevZ = z;
+                    d.prevYaw = yaw; d.prevPitch = pitch;
+                    continue;
+                }
+
+                d.lastDeltaX = d.deltaX; d.lastDeltaY = d.deltaY; d.lastDeltaZ = d.deltaZ;
+                d.lastDeltaXZ = d.deltaXZ;
+                d.deltaX = dx; d.deltaY = dy; d.deltaZ = dz;
+                d.deltaXZ = Math.hypot(dx, dz);
+                d.accelerationXZ = d.deltaXZ - d.lastDeltaXZ;
+                d.positionChanged = true;
+
+                d.lastYaw = d.yaw; d.lastPitch = d.pitch;
+                d.yaw = yaw; d.pitch = pitch;
+                d.lastDeltaYaw = d.deltaYaw; d.lastDeltaPitch = d.deltaPitch;
+                d.deltaYaw = Math.abs(MathUtil.wrapAngle(yaw - d.prevYaw));
+                d.deltaPitch = Math.abs(pitch - d.prevPitch);
+
+                d.lastOnGround = d.onGround;
+                d.clientGround = cg;
+                d.serverGround = LocationUtil.isOnGround(player.getWorld(), x, y, z);
+                d.onGround = cg || d.serverGround;
+                d.nearGround = d.serverGround;
+                if (d.onGround) { d.groundTicks++; d.airTicks = 0; d.sinceGroundTicks = 0; }
+                else { d.airTicks++; d.groundTicks = 0; d.sinceGroundTicks++; }
+
+                if (!spectatorish) {
+                    for (MovementCheck check : plugin.getCheckManager().movement()) {
+                        try {
+                            if (check.isEnabled()) check.handle(d, player);
+                        } catch (Throwable t) {
+                            plugin.getLogger().warning("Check " + check.getName() + " error: " + t);
+                        }
+                    }
+                    plugin.getSetbackManager().markValid(d, player, d.onGround || d.nearGround);
+                    if (d.setbackPending) { d.moveQueue.clear(); break; }
+                }
+
+                d.prevX = x; d.prevY = y; d.prevZ = z;
+                d.prevYaw = yaw; d.prevPitch = pitch;
             }
-
-            // Advance the lagback anchor only on a supported, accepted position.
-            plugin.getSetbackManager().markValid(d, player, d.onGround || d.nearGround);
         }
-    }
-
-    private void push(java.util.Deque<Float> dq, float v) {
-        dq.addLast(v);
-        while (dq.size() > 40) dq.removeFirst();
     }
 }
