@@ -87,7 +87,7 @@ checks:
   hitbox:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
   aimassist:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
   noswing:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  invalidattack:{ enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d }
+  invalidattack: { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d }
   criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   tbot:         { enabled: true, max-violations: 8,  punishment: kick, ban-duration: permanent, min-streak: 6 }
   velocity:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
@@ -104,13 +104,13 @@ checks:
   airplace:     { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 7d }
   chestswap:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, min-swap-ticks: 3 }
   autoeat:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  autoreplenish:{ enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  autoreplenish: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   fastuse:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   regen:        { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   autofish:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
   expthrower:   { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  inventoryhack:{ enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-clicks-per-sec: 18 }
-  inventorymove:{ enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  inventoryhack: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-clicks-per-sec: 18 }
+  inventorymove: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   autotool:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   fastplace:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-per-sec: 12 }
   blockreach:   { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-reach: 5.2 }
