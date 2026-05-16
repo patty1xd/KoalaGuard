@@ -1,7 +1,6 @@
 package com.koalaguard;
 
 import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.koalaguard.alert.AlertManager;
 import com.koalaguard.check.CheckManager;
 import com.koalaguard.command.KoalaGuardCommand;
@@ -63,8 +62,9 @@ public final class KoalaGuard extends JavaPlugin {
         checkManager.registerAll();
 
         // Packet capture (netty thread) — records ground truth into PlayerData.
-        PacketEvents.getAPI().getEventManager()
-                .registerListener(new PacketProcessor(this), PacketListenerPriority.MONITOR);
+        // Priority is carried by PacketListenerAbstract's constructor, so the
+        // single-arg (PacketListenerCommon) overload is the correct one.
+        PacketEvents.getAPI().getEventManager().registerListener(new PacketProcessor(this));
         PacketEvents.getAPI().init();
 
         // Main-thread evaluators consume the packet-accurate model.
