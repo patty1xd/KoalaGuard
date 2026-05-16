@@ -69,13 +69,14 @@ checks:
   # Modern MC allows omnidirectional sprint — only the hunger<=6 impossible state remains. Off by default.
   sprint:       { enabled: false, max-violations: 18, punishment: kick, ban-duration: 7d }
   phase:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  timer:        { enabled: true, max-violations: 14, punishment: kick, ban-duration: 7d, balance: 9.0 }
+  timer:        { enabled: true, max-violations: 14, punishment: kick, ban-duration: 7d, balance: 12.0 }
   fastclimb:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  antihunger:   { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
+  # FP-prone without full physics sim; off by default.
+  antihunger:   { enabled: false, max-violations: 15, punishment: kick, ban-duration: 7d }
   web:          { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   elytrafly:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d }
   blink:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
-  scaffold:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d, max-place-rate: 8 }
+  scaffold:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d, max-place-rate: 11, max-angle: 85.0 }
   burrow:       { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d }
 
   # ── COMBAT ──
@@ -94,7 +95,7 @@ checks:
   selftrap:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
   crystalaura:  { enabled: true, max-violations: 7,  punishment: kick, ban-duration: permanent, max-hits-per-sec: 6 }
   bowaimbot:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  autototem:    { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, min-reequip-ms: 150, sample-size: 8, max-stddev: 32.0, max-mean-ms: 900.0 }
+  autototem:    { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, min-reequip-ms: 150, sample-size: 6, max-stddev: 35.0, max-mean-ms: 950.0 }
   autoarmor:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   autoweapon:   { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
   offhand:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-swaps-per-sec: 10 }
