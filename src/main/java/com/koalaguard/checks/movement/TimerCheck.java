@@ -1,74 +1,50 @@
 package com.koalaguard.checks.movement;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.MovementCheck;
+import com.koalaguard.data.PlayerData;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.player.PlayerMoveEvent;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
 
 /**
- * Detects Timer / Speed hacks that work by sending extra movement packets.
+ * Timer / game-speed detection.
  *
- * In vanilla, a player sends roughly one movement update per server tick (50ms).
- * Timer cheats increase this to 1.5x–2x, effectively letting the player move faster
- * and attack more often.
- *
- * We detect this by measuring the time between consecutive position updates.
- * If the average inter-packet gap is consistently shorter than one tick (< ~42ms),
- * the player is almost certainly running a timer.
+ * The client sends ~20 position updates per second (one per tick). Timer
+ * hacks accelerate the client clock so more updates arrive per real second,
+ * letting the player move and attack faster. We use a leaking-balance model:
+ * each position packet credits one tick of "time"; if the player banks far
+ * more ticks than real time allows, they are running a timer.
  */
-public class TimerCheck extends Check {
+public final class TimerCheck extends MovementCheck {
 
-    private final Map<UUID, Long> lastMoveMs      = new HashMap<>();
-    private final Map<UUID, Long> windowStartMs   = new HashMap<>();
-    private final Map<UUID, Integer> fastMoves     = new HashMap<>();
+    public TimerCheck(KoalaGuard plugin) {
+        super(plugin, "timer", "Sending movement packets faster than real time");
+    }
 
-    // Interval shorter than this (ms) is considered "timer fast"
-    private static final long FAST_THRESHOLD_MS = 42L;
-    // How many fast intervals in one second before flagging
-    private static final int  FAST_MOVE_LIMIT   = 12;
+    @Override
+    public void handle(PlayerData data, Player player) {
+        if (data.exemptVehicle || data.exemptRiptide || data.exemptGliding) return;
+        long now = System.currentTimeMillis();
+        long last = data.getLong(k("last"));
+        data.setLong(k("last"), now);
+        if (last == 0) return;
 
-    public TimerCheck(KoalaGuard plugin) { super(plugin, "timer"); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onMove(PlayerMoveEvent event) {
-        if (!isEnabled()) return;
-        Player player = event.getPlayer();
-        if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
-        if (event.getTo() == null) return;
-
-        // Only care about actual position changes (ignore head rotation only)
-        if (event.getFrom().getX() == event.getTo().getX()
-                && event.getFrom().getY() == event.getTo().getY()
-                && event.getFrom().getZ() == event.getTo().getZ()) return;
-
-        UUID uuid = player.getUniqueId();
-        long now  = System.currentTimeMillis();
-        Long prev = lastMoveMs.put(uuid, now);
-        if (prev == null) return;
-
-        long interval = now - prev;
-
-        // Reset 1-second counting window
-        long wStart = windowStartMs.getOrDefault(uuid, now);
-        if (now - wStart >= 1000) {
-            fastMoves.put(uuid, 0);
-            windowStartMs.put(uuid, now);
+        long interval = now - last;
+        if (interval > 150) {                  // gap (lag/AFK) — reset balance
+            data.setBuffer(k("bal"), 0);
+            return;
         }
 
-        if (interval < FAST_THRESHOLD_MS) {
-            int count = fastMoves.merge(uuid, 1, Integer::sum);
-            if (count >= FAST_MOVE_LIMIT) {
-                flag(player, "fast_intervals=" + count + " avg<" + FAST_THRESHOLD_MS + "ms");
-                fastMoves.put(uuid, 0);
-                windowStartMs.put(uuid, now);
-            }
+        // Expected 50 ms per packet. Negative interval-deficit banks "extra"
+        // ticks. Drift accumulates only when consistently early.
+        double balance = data.buffer(k("bal"));
+        balance += (50.0 - interval);
+        balance = Math.max(-200.0, Math.min(2000.0, balance));
+        data.setBuffer(k("bal"), balance);
+
+        double trigger = cfgD("balance-ms", 320.0);
+        if (balance > trigger) {
+            fail(data, player, String.format("clock drift %.0fms ahead", balance));
+            data.setBuffer(k("bal"), 0);
         }
     }
 }

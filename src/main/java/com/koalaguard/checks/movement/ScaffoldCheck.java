@@ -1,100 +1,72 @@
 package com.koalaguard.checks.movement;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.block.BlockPlaceEvent;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 /**
- * Detects Scaffold (auto-bridging) cheats.
+ * Scaffold / auto-bridge detection.
  *
- * Legitimate bridging:
- *   - Player crouches, looks down/back, places blocks manually.
- *   - Maximum ~5-6 blocks/second even with practiced bridging.
- *
- * Scaffold cheat patterns:
- *   A) High block-place rate (> threshold/sec) while moving forward in air.
- *   B) Blocks placed directly under the player's feet while looking straight
- *      ahead (pitch > -20°) — impossible without automation.
- *   C) Player places blocks while in the air for too many consecutive placements.
+ * Real bridging requires a downward pitch and tops out around 6 blocks/sec.
+ * Scaffold places blocks under the feet at a high rate while looking forward
+ * (pitch not steeply down), often mid-air. Several weak signals feed one
+ * decaying buffer.
  */
-public class ScaffoldCheck extends Check {
+public final class ScaffoldCheck extends ListenerCheck {
 
-    // Per-player placement timestamps
-    private final Map<UUID, List<Long>>  placeTimes  = new HashMap<>();
-    // How many of the last placements were "under feet while looking forward"
-    private final Map<UUID, Integer>     aheadStreak = new HashMap<>();
-    // Air-placements streak (placing while not touching the ground)
-    private final Map<UUID, Integer>     airPlaceStreak = new HashMap<>();
-
-    public ScaffoldCheck(KoalaGuard plugin) { super(plugin, "scaffold"); }
+    public ScaffoldCheck(KoalaGuard plugin) {
+        super(plugin, "scaffold", CheckCategory.MOVEMENT, "Automated bridging / scaffold");
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onBlockPlace(BlockPlaceEvent event) {
+    public void onPlace(BlockPlaceEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
-        if (player.isFlying() || player.getAllowFlight()) return;
+        if (isExempt(player) || player.isFlying() || player.getAllowFlight()) return;
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
 
-        UUID uuid = player.getUniqueId();
-        long now  = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        Deque<Long> times = data.obj(k("t"));
+        if (times == null) { times = new ArrayDeque<>(); data.setObj(k("t"), times); }
+        times.addLast(now);
+        while (!times.isEmpty() && now - times.peekFirst() > 1000) times.removeFirst();
 
-        Location pLoc   = player.getLocation();
-        Location bLoc   = event.getBlock().getLocation();
-        float    pitch  = pLoc.getPitch();
+        Location p = player.getLocation();
+        Location b = event.getBlock().getLocation();
+        float pitch = p.getPitch();
 
-        // --- Sub-check A: high block-place rate ---
-        List<Long> times = placeTimes.computeIfAbsent(uuid, k -> new ArrayList<>());
-        times.add(now);
-        times.removeIf(t -> now - t > 1000);
+        double evidence = 0;
+        int rate = times.size();
+        if (rate > cfgI("max-place-rate", 8)) evidence += 2.5;
 
-        int maxRate = plugin.getConfig().getInt("checks.scaffold.max-place-rate", 10);
-        if (times.size() > maxRate) {
-            flag(player, "place_rate=" + times.size() + "/s");
-            times.clear();
-            return;
-        }
+        boolean underFeet = b.getY() < p.getY() && Math.abs(b.getX() + 0.5 - p.getX()) <= 1.0
+                && Math.abs(b.getZ() + 0.5 - p.getZ()) <= 1.0;
+        boolean lookingForward = pitch > -22;
+        if (underFeet && lookingForward) evidence += 2.0;
 
-        // --- Sub-check B: placing block directly below feet while looking forward ---
-        // "Below feet" means block Y is at or below player's feet Y, and within 1 block XZ
-        boolean underFeet = bLoc.getY() <= pLoc.getY()
-                && Math.abs(bLoc.getX() - pLoc.getX()) <= 1.0
-                && Math.abs(bLoc.getZ() - pLoc.getZ()) <= 1.0;
-
-        // "Looking forward" means not looking down (pitch > -20°)
-        // Real scaffold bridging requires pitch < -45° at minimum
-        boolean lookingForward = pitch > -20;
-
-        if (underFeet && lookingForward) {
-            int streak = aheadStreak.merge(uuid, 1, Integer::sum);
-            if (streak >= 4) {
-                flag(player, "forward_scaffold pitch=" + String.format("%.1f", pitch) + " streak=" + streak);
-                aheadStreak.put(uuid, 0);
-            }
-        } else {
-            aheadStreak.put(uuid, 0);
-        }
-
-        // --- Sub-check C: placing multiple blocks while in the air ---
         boolean inAir = !player.isOnGround()
-                && !player.isInWater()
-                && !player.getLocation().getBlock().getRelative(0, -1, 0).getType().isSolid();
+                && !player.getLocation().clone().subtract(0, 0.1, 0).getBlock().getType().isSolid();
+        if (inAir && underFeet) evidence += 1.5;
 
-        if (inAir) {
-            int streak = airPlaceStreak.merge(uuid, 1, Integer::sum);
-            int maxAir = plugin.getConfig().getInt("checks.scaffold.max-air-placements", 3);
-            if (streak > maxAir) {
-                flag(player, "air_scaffold streak=" + streak);
-                airPlaceStreak.put(uuid, 0);
+        if (evidence > 0) {
+            double buf = data.addBuffer(k("b"), evidence, 12.0);
+            if (buf >= 6.0) {
+                fail(data, player, String.format("rate=%d/s pitch=%.0f° air=%b",
+                        rate, pitch, inAir));
+                data.setBuffer(k("b"), 1.0);
             }
         } else {
-            airPlaceStreak.put(uuid, 0);
+            data.subBuffer(k("b"), 1.5);
         }
     }
 }

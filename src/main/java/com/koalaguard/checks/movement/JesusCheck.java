@@ -1,74 +1,57 @@
 package com.koalaguard.checks.movement;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.MovementCheck;
+import com.koalaguard.data.PlayerData;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.player.PlayerMoveEvent;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
 
 /**
- * Detects Meteor Jesus (water walking).
+ * Jesus / water-walk detection.
  *
- * From Meteor's source (Jesus.java):
- *   - "Packet" mode: sends fake onGround=true packets while over water,
- *     making the server treat the player as standing on the surface.
- *   - "Vanilla" / "Timer" modes: exploit stepping/timer to walk on water.
- *   - Server-observable: player.isOnGround() returns true while the block
- *     at the player's feet position is a liquid (WATER / LAVA), and the
- *     player is moving horizontally across the surface without sinking.
- *
- * Detection:
- *   player.isOnGround() AND feet block is a liquid AND horizontal movement
- *   is occurring (player is not just floating still in a pool).
- *   Require streak of 5 consecutive such ticks before flagging to avoid
- *   FPs from normal water-entry moments.
+ * The player moves horizontally across a liquid surface without sinking and
+ * while the client reports being on the ground — only possible by spoofing
+ * ground packets over water. Frost Walker and lily pads are excluded.
  */
-public class JesusCheck extends Check {
+public final class JesusCheck extends MovementCheck {
 
-    private final Map<UUID, Integer> liquidGroundStreak = new HashMap<>();
+    public JesusCheck(KoalaGuard plugin) {
+        super(plugin, "jesus", "Walking on the surface of a liquid");
+    }
 
-    public JesusCheck(KoalaGuard plugin) { super(plugin, "jesus"); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onMove(PlayerMoveEvent event) {
-        if (!isEnabled()) return;
-        Player player = event.getPlayer();
-        if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
-        if (event.getTo() == null) return;
-
-        // Legitimate exemptions
-        if (player.isFlying() || player.getAllowFlight()) return;
-        if (player.isInsideVehicle()) return;
-        if (player.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)) return;
-        if (plugin.getPlayerState().recentlyUsedRiptide(player, 2000)) return;
-
-        Material feet = event.getTo().getBlock().getType();
-        boolean inLiquid = feet == Material.WATER || feet == Material.LAVA;
-
-        UUID uuid = player.getUniqueId();
-
-        if (inLiquid && player.isOnGround()) {
-            // Check horizontal movement (not just standing still in shallow water)
-            double dx = event.getTo().getX() - event.getFrom().getX();
-            double dz = event.getTo().getZ() - event.getFrom().getZ();
-            double h = Math.sqrt(dx * dx + dz * dz);
-
-            if (h > 0.05) {
-                int streak = liquidGroundStreak.merge(uuid, 1, Integer::sum);
-                if (streak >= 5) {
-                    flag(player, "walking_on=" + feet.name() + " h=" + String.format("%.3f", h));
-                    liquidGroundStreak.put(uuid, 0);
-                }
-                return;
-            }
+    @Override
+    public void handle(PlayerData data, Player player) {
+        if (data.exemptFlying || data.exemptVehicle || data.exemptRiptide
+                || data.exemptSlowFalling) { data.setInt(k("s"), 0); return; }
+        long now = System.currentTimeMillis();
+        if (now - data.lastRiptideMs < 2500 || now - data.lastVelocityMs < 1000) {
+            data.setInt(k("s"), 0);
+            return;
         }
-        liquidGroundStreak.put(uuid, 0);
+
+        Material feet = player.getLocation().getBlock().getType();
+        Material below = player.getLocation().clone().subtract(0, 0.1, 0).getBlock().getType();
+        boolean onLiquid = (feet == Material.WATER || feet == Material.LAVA)
+                || (below == Material.WATER || below == Material.LAVA);
+
+        if (!onLiquid) { data.setInt(k("s"), 0); data.subBuffer(k("b"), 1.0); return; }
+        if (player.isInWater() && data.deltaY < -0.02) { data.setInt(k("s"), 0); return; }
+
+        boolean movingFlat = data.deltaXZ > 0.08 && Math.abs(data.deltaY) < 0.02;
+        boolean claimsGround = data.clientGround && !data.serverGround;
+
+        if (movingFlat && claimsGround) {
+            int s = data.incInt(k("s"));
+            if (s >= 6) {
+                double buf = data.addBuffer(k("b"), 3.0, 9.0);
+                if (buf >= 5.0) {
+                    fail(data, player, String.format("on=%s h=%.3f streak=%d", feet, data.deltaXZ, s));
+                    data.setBuffer(k("b"), 1.0);
+                }
+                data.setInt(k("s"), 0);
+            }
+        } else {
+            data.setInt(k("s"), 0);
+        }
     }
 }

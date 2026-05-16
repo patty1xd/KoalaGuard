@@ -1,34 +1,46 @@
 package com.koalaguard.checks.movement;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
-import org.bukkit.GameMode;
-import org.bukkit.Material;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.block.BlockPlaceEvent;
 
-public class BurrowCheck extends Check {
-    public BurrowCheck(KoalaGuard plugin) { super(plugin, "burrow"); }
+/**
+ * Burrow detection — placing a solid block inside the player's own feet
+ * position to phase underground. Physically impossible legitimately, so a
+ * single confident occurrence flags.
+ */
+public final class BurrowCheck extends ListenerCheck {
+
+    public BurrowCheck(KoalaGuard plugin) {
+        super(plugin, "burrow", CheckCategory.MOVEMENT, "Placing a block inside one's own hitbox");
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onBlockPlace(BlockPlaceEvent event) {
+    public void onPlace(BlockPlaceEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
+        if (isExempt(player) || player.isFlying() || player.getAllowFlight()) return;
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
 
-        // Burrow = placing a block at the same location as the player (inside themselves)
+        Block placed = event.getBlockPlaced();
+        if (!placed.getType().isSolid()) return;
+
         double px = player.getLocation().getX();
         double py = player.getLocation().getY();
         double pz = player.getLocation().getZ();
-        double bx = event.getBlockPlaced().getX() + 0.5;
-        double by = event.getBlockPlaced().getY();
-        double bz = event.getBlockPlaced().getZ() + 0.5;
 
-        if (Math.abs(px - bx) < 0.5 && Math.abs(pz - bz) < 0.5 && (py >= by && py <= by + 2)) {
-            flag(player, "placed_inside_self");
-        }
+        double xz = Math.hypot(px - (placed.getX() + 0.5), pz - (placed.getZ() + 0.5));
+        if (xz > 0.5) return;
+        if (placed.getY() != (int) Math.floor(py)) return;
+
+        fail(data, player, "block=" + placed.getType()
+                + " at " + placed.getX() + "," + placed.getY() + "," + placed.getZ());
     }
 }
