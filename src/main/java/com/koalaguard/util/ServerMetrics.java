@@ -3,39 +3,33 @@ package com.koalaguard.util;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
-import java.lang.reflect.Method;
-
+/**
+ * Server health metrics. Paper 1.21.11 exposes {@link Player#getPing()} and
+ * {@link org.bukkit.Server#getTPS()} directly, so no reflection is needed.
+ */
 public final class ServerMetrics {
-  private final Method getPingMethod;
 
-  public ServerMetrics() {
-    Method m = null;
-    try {
-      m = Player.class.getMethod("getPing"); // Paper
-    } catch (Exception ignored) {
+    public int pingMs(Player player) {
+        if (player == null) return -1;
+        try {
+            return player.getPing();
+        } catch (Throwable ignored) {
+            return -1;
+        }
     }
-    this.getPingMethod = m;
-  }
 
-  public int pingMs(Player player) {
-    if (player == null) return -1;
-    if (getPingMethod != null) {
-      try {
-        Object v = getPingMethod.invoke(player);
-        if (v instanceof Integer i) return i;
-      } catch (Exception ignored) {
-      }
+    public double tps() {
+        try {
+            double[] tps = Bukkit.getServer().getTPS();
+            if (tps != null && tps.length > 0) return Math.min(20.0, tps[0]);
+        } catch (Throwable ignored) {
+        }
+        return 20.0;
     }
-    return -1;
-  }
 
-  public double tps1m() {
-    try {
-      double[] tps = Bukkit.getServer().getTPS(); // Paper
-      if (tps != null && tps.length > 0) return tps[0];
-    } catch (Throwable ignored) {
+    /** Approximate ping in ticks (1 tick = 50 ms). */
+    public int pingTicks(Player player) {
+        int ms = pingMs(player);
+        return ms < 0 ? 0 : ms / 50;
     }
-    return 20.0;
-  }
 }
-

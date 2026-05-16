@@ -1,0 +1,78 @@
+package com.koalaguard.util;
+
+import java.util.Collection;
+
+/**
+ * Lightweight statistical helpers used by the behavioural checks.
+ * All methods are null/empty safe and allocation-free where possible.
+ */
+public final class MathUtil {
+
+    private MathUtil() {}
+
+    public static double average(Collection<? extends Number> values) {
+        if (values == null || values.isEmpty()) return 0.0;
+        double sum = 0.0;
+        for (Number n : values) sum += n.doubleValue();
+        return sum / values.size();
+    }
+
+    public static double variance(Collection<? extends Number> values) {
+        if (values == null || values.size() < 2) return Double.MAX_VALUE;
+        double mean = average(values);
+        double sum = 0.0;
+        for (Number n : values) {
+            double d = n.doubleValue() - mean;
+            sum += d * d;
+        }
+        return sum / values.size();
+    }
+
+    public static double standardDeviation(Collection<? extends Number> values) {
+        return Math.sqrt(variance(values));
+    }
+
+    /**
+     * Number of values that are repeated more than once (low = machine-like).
+     * Used to detect "perfectly even" automated timing.
+     */
+    public static int duplicates(Collection<? extends Number> values) {
+        if (values == null) return 0;
+        java.util.HashMap<Long, Integer> seen = new java.util.HashMap<>();
+        int dupes = 0;
+        for (Number n : values) {
+            long key = Math.round(n.doubleValue());
+            int c = seen.merge(key, 1, Integer::sum);
+            if (c == 2) dupes++;
+        }
+        return dupes;
+    }
+
+    /**
+     * Greatest-common-divisor of two doubles, used for rotation/GCD analysis.
+     * A real mouse produces tiny irregular rotation steps; cheat clients that
+     * snap rotations produce a measurable, repeating granularity.
+     */
+    public static double gcd(double a, double b) {
+        a = Math.abs(a);
+        b = Math.abs(b);
+        if (b < 1.0E-4) return a;
+        return gcd(b, a % b);
+    }
+
+    public static float wrapAngle(float angle) {
+        angle %= 360.0f;
+        if (angle >= 180.0f) angle -= 360.0f;
+        if (angle < -180.0f) angle += 360.0f;
+        return angle;
+    }
+
+    public static double clamp(double v, double min, double max) {
+        return v < min ? min : Math.min(v, max);
+    }
+
+    public static double round(double v, int places) {
+        double f = Math.pow(10, places);
+        return Math.round(v * f) / f;
+    }
+}
