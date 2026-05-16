@@ -22,6 +22,10 @@
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
+        <repository>
+            <id>codemc-releases</id>
+            <url>https://repo.codemc.io/repository/maven-releases/</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -37,6 +41,13 @@
             <artifactId>gson</artifactId>
             <version>2.10.1</version>
             <scope>provided</scope>
+        </dependency>
+        <!-- PacketEvents 2.12.0 — packet-level interception (1.8–1.21.11). Shaded + relocated. -->
+        <dependency>
+            <groupId>com.github.retrooper</groupId>
+            <artifactId>packetevents-spigot</artifactId>
+            <version>2.12.0</version>
+            <scope>compile</scope>
         </dependency>
         <!-- JDA (Discord bot library) — audio excluded; slf4j is provided by Paper. -->
         <dependency>
@@ -77,8 +88,35 @@
                         <goals><goal>shade</goal></goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>module-info.class</exclude>
+                                        <exclude>META-INF/versions/*/module-info.class</exclude>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/LICENSE*</exclude>
+                                        <exclude>META-INF/NOTICE*</exclude>
+                                        <exclude>META-INF/DEPENDENCIES</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
                             <relocations>
-                                <!-- Relocate JDA transitive deps to avoid classpath conflicts with Paper -->
+                                <!-- PacketEvents -->
+                                <relocation>
+                                    <pattern>com.github.retrooper.packetevents</pattern>
+                                    <shadedPattern>com.koalaguard.libs.packetevents.api</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>io.github.retrooper.packetevents</pattern>
+                                    <shadedPattern>com.koalaguard.libs.packetevents.impl</shadedPattern>
+                                </relocation>
+                                <!-- JDA transitive deps to avoid classpath conflicts with Paper -->
                                 <relocation>
                                     <pattern>okhttp3</pattern>
                                     <shadedPattern>com.koalaguard.libs.okhttp3</shadedPattern>
@@ -94,6 +132,14 @@
                                 <relocation>
                                     <pattern>gnu.trove</pattern>
                                     <shadedPattern>com.koalaguard.libs.trove</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>kotlin</pattern>
+                                    <shadedPattern>com.koalaguard.libs.kotlin</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson</pattern>
+                                    <shadedPattern>com.koalaguard.libs.jackson</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>net.dv8tion.jda</pattern>
