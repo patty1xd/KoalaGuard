@@ -1,77 +1,55 @@
 package com.koalaguard.checks.combat;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.CombatCheck;
+import com.koalaguard.data.PlayerData;
+import com.koalaguard.util.MathUtil;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Detects Meteor AutoClicker.
+ * AutoClicker detection.
  *
- * From Meteor's source (AutoClicker.java):
- *   - Default delay: 2 ticks between clicks = ~100 ms = ~10 CPS.
- *   - Minimum delay: 0 ticks = theoretically 20 CPS (one per tick).
- *   - In "Hold" mode: sends clicks at the configured tick rate continuously.
- *
- * Observable signatures:
- *   A) CPS above human maximum (~20 CPS hard cap, flagged at max-cps).
- *   B) Click interval variance far too low — AutoClicker fires at a fixed
- *      tick rate, producing almost perfectly regular intervals.
- *      Meteor at 2-tick delay = intervals of ~100 ms with near-zero jitter.
- *      Human clicking always has variance > 400 ms² even at consistent pace.
+ * Two independent signals: a raw CPS ceiling no human sustains, and a
+ * machine-regularity signal (extremely low click-interval variance and many
+ * near-identical intervals) which catches "humanised" clickers that stay
+ * under the CPS cap.
  */
-public class AutoClickerCheck extends Check {
+public final class AutoClickerCheck extends CombatCheck {
 
-    private final Map<UUID, List<Long>> clickTimes = new HashMap<>();
+    public AutoClickerCheck(KoalaGuard plugin) {
+        super(plugin, "autoclicker", "Inhuman click rate / machine-regular clicking");
+    }
 
-    public AutoClickerCheck(KoalaGuard plugin) { super(plugin, "autoclicker"); }
+    @Override
+    public void handle(PlayerData data, Player attacker, Entity victim, EntityDamageByEntityEvent e) {
+        long now = System.currentTimeMillis();
+        long cps = data.attackTimes.stream().filter(t -> now - t <= 1000).count();
+        int maxCps = cfgI("max-cps", 22);
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onDamage(EntityDamageByEntityEvent event) {
-        if (!isEnabled()) return;
-        if (!(event.getDamager() instanceof Player player)) return;
-        if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
-
-        UUID uuid = player.getUniqueId();
-        long now  = System.currentTimeMillis();
-
-        List<Long> times = clickTimes.computeIfAbsent(uuid, k -> new ArrayList<>());
-        times.add(now);
-        times.removeIf(t -> now - t > 1000);
-
-        int cps    = times.size();
-        int maxCps = plugin.getConfig().getInt("checks.autoclicker.max-cps", 20);
-
-        // ── Check A: CPS too high ──────────────────────────────────────────
         if (cps > maxCps) {
-            flag(player, "cps=" + cps + " max=" + maxCps);
+            double buf = data.addBuffer(k("b"), 2.0, 8.0);
+            if (buf >= 4.0) {
+                fail(data, attacker, "cps=" + cps + " max=" + maxCps);
+                data.setBuffer(k("b"), 1.0);
+            }
             return;
         }
 
-        // ── Check B: Interval variance too low (machine-like precision) ────
-        // Require at least 10 samples and CPS >= 8 to avoid flagging slow clickers
-        if (times.size() >= 10 && cps >= 8) {
-            List<Long> intervals = new ArrayList<>();
-            for (int i = 1; i < times.size(); i++) {
-                intervals.add(times.get(i) - times.get(i - 1));
-            }
-
-            double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0);
-            double variance = intervals.stream()
-                    .mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0);
-
-            // Human variance at high CPS: typically 400–5000 ms².
-            // Meteor AutoClicker at 2-tick delay: variance < 50 ms².
-            // We use 80 as the threshold to be safe.
-            if (variance < 80) {
-                flag(player, String.format("machine_clicks cps=%d var=%.1f mean=%.1fms",
-                        cps, variance, mean));
-                times.clear();
+        if (data.attackIntervals.size() >= 18 && cps >= 8) {
+            List<Long> iv = new ArrayList<>(data.attackIntervals);
+            double var = MathUtil.variance(iv);
+            int dupes = MathUtil.duplicates(iv);
+            double mean = MathUtil.average(iv);
+            // Humans never hold variance < ~110 ms² with this many duplicates.
+            if (var < 110 && dupes >= 6 && mean > 30) {
+                fail(data, attacker, String.format("machine cps=%d var=%.1f dupes=%d mean=%.0fms",
+                        cps, var, dupes, mean));
+                data.attackIntervals.clear();
             }
         }
     }

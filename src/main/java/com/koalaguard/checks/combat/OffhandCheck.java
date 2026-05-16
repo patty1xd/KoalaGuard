@@ -1,80 +1,56 @@
 package com.koalaguard.checks.combat;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
+import com.koalaguard.util.MathUtil;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Deque;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 /**
- * Detects Meteor InvManager rapid offhand switching.
- *
- * From Meteor's source (InvManager.java / OffhandManager):
- *   - Manages the offhand slot automatically (e.g., keeps totem/crystal/gapple).
- *   - Uses the F-key swap packet (ServerboundPlayerActionPacket SWAP_ITEM_WITH_OFFHAND)
- *     or direct slot manipulation — fires PlayerSwapHandItemsEvent.
- *   - When managing offhand rapidly (e.g., crystal PvP + totem), can swap
- *     multiple times per second.
- *
- * Human baseline: F-key pressing cannot exceed ~8 swaps/sec.
- *   Meteor InvManager can fire > 10 swaps/sec with 0-tick delay.
- *
- * Detection:
- *   More than 10 PlayerSwapHandItemsEvents in 1 second = automated.
- *   Interval variance < 20 ms² over 10 swaps = machine timing.
+ * Offhand-manager detection — automated F-key offhand juggling. Flags an
+ * inhuman swap rate or machine-regular swap intervals.
  */
-public class OffhandCheck extends Check {
+public final class OffhandCheck extends ListenerCheck {
 
-    private final Map<UUID, List<Long>> swapTimes = new HashMap<>();
-
-    private static final int  MAX_SWAPS_PER_SEC = 10;
-    private static final long WINDOW_MS         = 1000L;
-
-    public OffhandCheck(KoalaGuard plugin) { super(plugin, "offhand"); }
+    public OffhandCheck(KoalaGuard plugin) {
+        super(plugin, "offhand", CheckCategory.COMBAT, "Automated offhand swapping");
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onSwap(PlayerSwapHandItemsEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
 
-        UUID uuid = player.getUniqueId();
-        long now  = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        Deque<Long> t = data.obj(k("t"));
+        if (t == null) { t = new ArrayDeque<>(); data.setObj(k("t"), t); }
+        t.addLast(now);
+        while (!t.isEmpty() && now - t.peekFirst() > 1000) t.removeFirst();
 
-        List<Long> times = swapTimes.computeIfAbsent(uuid, k -> new ArrayList<>());
-        times.add(now);
-        times.removeIf(t -> now - t > WINDOW_MS);
-
-        int swaps = times.size();
-
-        // Sub-check A: raw swap rate
-        if (swaps > MAX_SWAPS_PER_SEC) {
-            flag(player, "swap_rate=" + swaps + "/s");
-            times.clear();
+        if (t.size() > cfgI("max-swaps-per-sec", 10)) {
+            fail(data, player, "swap rate=" + t.size() + "/s");
+            t.clear();
             return;
         }
-
-        // Sub-check B: machine-precise interval variance over 10 swaps
-        if (swaps >= 10) {
-            List<Long> intervals = new ArrayList<>();
-            for (int i = 1; i < times.size(); i++) {
-                intervals.add(times.get(i) - times.get(i - 1));
-            }
-            double mean = intervals.stream().mapToLong(Long::longValue).average().orElse(0);
-            double variance = intervals.stream()
-                    .mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0);
-            if (variance < 20) {
-                flag(player, String.format("machine_swap swaps=%d var=%.1f mean=%.1fms",
-                        swaps, variance, mean));
-                times.clear();
+        if (t.size() >= 10) {
+            List<Long> iv = new ArrayList<>();
+            Long prev = null;
+            for (Long v : t) { if (prev != null) iv.add(v - prev); prev = v; }
+            if (MathUtil.variance(iv) < 25 && MathUtil.duplicates(iv) >= 4) {
+                fail(data, player, "machine swap var=" + (int) MathUtil.variance(iv));
+                t.clear();
             }
         }
     }

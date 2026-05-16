@@ -1,67 +1,53 @@
 package com.koalaguard.checks.combat;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-
 /**
- * Detects Meteor AutoWeapon.
- *
- * From Meteor's source (AutoWeapon.java):
- *   - On each tick, scans hotbar for the highest-damage weapon.
- *   - If a better weapon is found, calls InvUtils.swap() — changes hotbar slot.
- *   - The swap fires PlayerItemHeldEvent, and Meteor's KillAura/AutoClicker hits
- *     immediately after in the SAME tick.
- *   - Server-side: slot change + EntityDamageByEntityEvent within < 50 ms.
- *
- * Human baseline: after manually switching weapon with scroll/number keys
- *   a player cannot attack in < 100 ms (typical is 200–400 ms).
- *
- * Detection:
- *   If a hit occurs within INSTANT_HIT_MS of a hotbar slot change, increment streak.
- *   Require 3 consecutive such events before flagging (absorbs accidental fast hits).
+ * AutoWeapon detection — a hotbar slot change followed by a melee hit in the
+ * same tick (≤ ~55 ms). A human cannot switch and attack that fast; the
+ * cheat scans for the best weapon and hits in one tick.
  */
-public class AutoWeaponCheck extends Check {
+public final class AutoWeaponCheck extends ListenerCheck {
 
-    private final Map<UUID, Long>    lastSlotChange = new HashMap<>();
-    private final Map<UUID, Integer> streak         = new HashMap<>();
-
-    private static final long INSTANT_HIT_MS = 50L;
-
-    public AutoWeaponCheck(KoalaGuard plugin) { super(plugin, "autoweapon"); }
+    public AutoWeaponCheck(KoalaGuard plugin) {
+        super(plugin, "autoweapon", CheckCategory.COMBAT, "Switching weapon and hitting in one tick");
+    }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onSlotChange(PlayerItemHeldEvent event) {
-        lastSlotChange.put(event.getPlayer().getUniqueId(), System.currentTimeMillis());
+    public void onSlot(PlayerItemHeldEvent event) {
+        PlayerData d = plugin.getDataManager().get(event.getPlayer());
+        if (d != null) d.setLong(k("slot"), System.currentTimeMillis());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onDamage(EntityDamageByEntityEvent event) {
+    public void onAttack(EntityDamageByEntityEvent event) {
         if (!isEnabled()) return;
+        if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
         if (!(event.getDamager() instanceof Player player)) return;
         if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
 
-        UUID uuid = player.getUniqueId();
-        long now  = System.currentTimeMillis();
-        Long slotMs = lastSlotChange.get(uuid);
-
-        if (slotMs != null && now - slotMs < INSTANT_HIT_MS) {
-            int s = streak.merge(uuid, 1, Integer::sum);
+        long slotMs = data.getLong(k("slot"));
+        if (slotMs == 0) return;
+        long gap = System.currentTimeMillis() - slotMs;
+        if (gap < 55) {
+            int s = data.incInt(k("s"));
             if (s >= 3) {
-                flag(player, "swap_to_hit=" + (now - slotMs) + "ms streak=" + s);
-                streak.put(uuid, 0);
+                fail(data, player, "switch→hit " + gap + "ms streak=" + s);
+                data.setInt(k("s"), 0);
             }
         } else {
-            streak.put(uuid, 0);
+            data.setInt(k("s"), 0);
         }
     }
 }
