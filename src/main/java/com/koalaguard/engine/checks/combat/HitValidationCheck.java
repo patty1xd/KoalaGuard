@@ -1,0 +1,88 @@
+package com.koalaguard.engine.checks.combat;
+
+import com.koalaguard.KoalaGuard;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.engine.check.CheckContext;
+import com.koalaguard.engine.check.SimCheck;
+import com.koalaguard.engine.packet.PacketKind;
+import com.koalaguard.engine.state.PositionFrame;
+import com.koalaguard.engine.util.Combat;
+import org.bukkit.entity.Entity;
+import org.bukkit.util.BoundingBox;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Validates the full hit as a state transition, not an event:
+ *  1. the reconstructed look ray at the attack tick must actually point at the
+ *     victim's reconstructed hitbox (within its real angular size + slack) —
+ *     a hit while aimed away is KillAura / Hitbox / rotation-spoof,
+ *  2. a corroborating swing animation must exist in the packet stream around
+ *     the attack — an attack with no swing in the log is an invalid
+ *     interaction chain (NoSwing / packet-only aura).
+ * Either contradiction, sustained, is confirmed.
+ */
+public final class HitValidationCheck extends SimCheck {
+
+    private final Map<UUID, Long> seen = new ConcurrentHashMap<>();
+
+    public HitValidationCheck(KoalaGuard plugin) {
+        super(plugin, "hitvalidation", CheckCategory.COMBAT,
+                "Hit not supported by reconstructed aim / swing chain");
+    }
+
+    @Override
+    public void onTick(CheckContext ctx) {
+        long atk = ctx.state.combat.lastAttackTick;
+        if (atk < 0) return;
+        UUID id = ctx.data.getUuid();
+        if (seen.getOrDefault(id, -1L) == atk) return;
+        seen.put(id, atk);
+        if (ctx.unstableBasic()) return;
+
+        Entity victim = Combat.resolveById(ctx.player,
+                ctx.state.combat.lastAttackEntityId, 8.0);
+        if (victim == null) return;
+
+        PositionFrame f = ctx.state.frameAtOrBefore(atk);
+        if (f == null) return;
+        double[] eye = Combat.eyeOf(f, Combat.eyeHeight(ctx.player));
+
+        double angle = Combat.aimAngle(eye[0], eye[1], eye[2], f.yaw, f.pitch, victim);
+        double dist = Math.max(0.5, Combat.distanceToBox(eye[0], eye[1], eye[2], victim));
+        BoundingBox b = victim.getBoundingBox();
+        double radius = Math.max(b.getWidthX(), b.getHeight()) / 2.0 + 0.10;
+        double maxAngle = Math.toDegrees(Math.atan2(radius, dist))
+                + cfgD("angle-slack-deg", 9.0);
+
+        boolean swung = ctx.state.log.existsSinceTick(
+                atk - cfgI("swing-window-ticks", 4),
+                p -> p.kind == PacketKind.ANIMATION);
+
+        double bad = 0;
+        StringBuilder why = new StringBuilder();
+        if (angle > maxAngle) {
+            bad += (angle - maxAngle) * cfgD("angle-score-scale", 0.6);
+            why.append(String.format("aim %.1f° > %.1f° ", angle, maxAngle));
+        }
+        if (!swung) {
+            bad += cfgD("noswing-score", 5.0);
+            why.append("no swing in chain ");
+        }
+
+        if (bad > 0) {
+            diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 4),
+                    "invalid hit: " + why.toString().trim(), false);
+        } else {
+            clean(ctx, 1.5);
+        }
+    }
+
+    @Override
+    public void cleanup(UUID uuid) {
+        super.cleanup(uuid);
+        seen.remove(uuid);
+    }
+}
