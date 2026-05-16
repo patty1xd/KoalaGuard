@@ -9,13 +9,12 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 
+import java.util.List;
+
 /**
- * TriggerBot detection.
- *
- * A trigger bot fires the instant the crosshair crosses an enemy with no
- * tracking input of its own. Signature: a sustained run of dead-centre hits
- * (angle ≈ 0) on a moving entity while the attacker performs essentially no
- * rotation — a human tracking a moving target always micro-corrects.
+ * TriggerBot — a sustained run of dead-centre hits (by real client aim) on a
+ * MOVING entity while the client performs essentially no tracking rotation.
+ * A human tracking a moving target always micro-corrects.
  */
 public final class TBotCheck extends CombatCheck {
 
@@ -24,28 +23,27 @@ public final class TBotCheck extends CombatCheck {
     }
 
     @Override
-    public void handle(PlayerData data, Player attacker, Entity victim, EntityDamageByEntityEvent e) {
-        if (!(victim instanceof LivingEntity le)) { data.setInt(k("s"), 0); return; }
+    public void handle(PlayerData d, Player attacker, Entity victim, EntityDamageByEntityEvent e) {
+        if (!(victim instanceof LivingEntity le)) { d.setInt(k("s"), 0); return; }
+
+        double ex, ey, ez;
+        if (d.pHasPos) { ex = d.pX; ey = d.pY + attacker.getEyeHeight(); ez = d.pZ; }
+        else { ex = attacker.getEyeLocation().getX(); ey = attacker.getEyeLocation().getY(); ez = attacker.getEyeLocation().getZ(); }
+
+        double angle = LocationUtil.lookAngle(ex, ey, ez, d.pYaw, d.pPitch, victim);
         boolean victimMoving = le.getVelocity().lengthSquared() > 0.003;
-        double angle = LocationUtil.horizontalAngle(attacker, victim);
 
-        float rot = 0;
-        int n = 0;
-        java.util.Iterator<Float> it = data.yawSamples.descendingIterator();
-        while (it.hasNext() && n < 3) { rot += Math.abs(it.next()); n++; }
+        List<Float> yd = d.yawDeltas(3);
+        double rot = 0; for (float f : yd) rot += f;
 
-        boolean deadCentre = angle < 4.0;
-        boolean noTracking = rot < 0.8;
-
-        if (victimMoving && deadCentre && noTracking) {
-            int s = data.incInt(k("s"));
+        if (victimMoving && angle < 4.0 && rot < 0.8) {
+            int s = d.incInt(k("s"));
             if (s >= cfgI("min-streak", 6)) {
-                fail(data, attacker, String.format("centred hits w/o tracking streak=%d angle=%.1f°",
-                        s, angle));
-                data.setInt(k("s"), 0);
+                fail(d, attacker, String.format("centred w/o tracking streak=%d angle=%.1f°", s, angle));
+                d.setInt(k("s"), 0);
             }
         } else {
-            data.addInt(k("s"), -1);
+            d.addInt(k("s"), -1);
         }
     }
 }

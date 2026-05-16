@@ -12,44 +12,42 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AutoClicker detection.
- *
- * Two independent signals: a raw CPS ceiling no human sustains, and a
- * machine-regularity signal (extremely low click-interval variance and many
- * near-identical intervals) which catches "humanised" clickers that stay
- * under the CPS cap.
+ * AutoClicker — driven by the TRUE attack packets (INTERACT_ENTITY) captured
+ * on the netty thread, not by damage events. Two signals: a CPS ceiling no
+ * human sustains, and machine regularity (very low click-interval variance
+ * with many near-identical intervals) for "humanised" clickers under the cap.
  */
 public final class AutoClickerCheck extends CombatCheck {
 
     public AutoClickerCheck(KoalaGuard plugin) {
-        super(plugin, "autoclicker", "Inhuman click rate / machine-regular clicking");
+        super(plugin, "autoclicker", "Inhuman / machine-regular click rate");
     }
 
     @Override
-    public void handle(PlayerData data, Player attacker, Entity victim, EntityDamageByEntityEvent e) {
+    public void handle(PlayerData d, Player attacker, Entity victim, EntityDamageByEntityEvent e) {
         long now = System.currentTimeMillis();
-        long cps = data.attackTimes.stream().filter(t -> now - t <= 1000).count();
+        long cps = d.attackPacketTimes.stream().filter(t -> now - t <= 1000).count();
         int maxCps = cfgI("max-cps", 22);
 
         if (cps > maxCps) {
-            double buf = data.addBuffer(k("b"), 2.0, 8.0);
+            double buf = d.addBuffer(k("b"), 2.0, 8.0);
             if (buf >= 4.0) {
-                fail(data, attacker, "cps=" + cps + " max=" + maxCps);
-                data.setBuffer(k("b"), 1.0);
+                fail(d, attacker, "cps=" + cps + " max=" + maxCps);
+                d.setBuffer(k("b"), 1.0);
             }
             return;
         }
 
-        if (data.attackIntervals.size() >= 18 && cps >= 8) {
-            List<Long> iv = new ArrayList<>(data.attackIntervals);
+        List<Long> times = new ArrayList<>(d.attackPacketTimes);
+        if (times.size() >= 20 && cps >= 8) {
+            List<Long> iv = new ArrayList<>();
+            for (int i = 1; i < times.size(); i++) iv.add(times.get(i) - times.get(i - 1));
             double var = MathUtil.variance(iv);
             int dupes = MathUtil.duplicates(iv);
             double mean = MathUtil.average(iv);
-            // Humans never hold variance < ~110 ms² with this many duplicates.
-            if (var < 110 && dupes >= 6 && mean > 30) {
-                fail(data, attacker, String.format("machine cps=%d var=%.1f dupes=%d mean=%.0fms",
-                        cps, var, dupes, mean));
-                data.attackIntervals.clear();
+            if (var < 100 && dupes >= 7 && mean > 25) {
+                fail(d, attacker, String.format("machine cps=%d var=%.1f dupes=%d", cps, var, dupes));
+                d.attackPacketTimes.clear();
             }
         }
     }

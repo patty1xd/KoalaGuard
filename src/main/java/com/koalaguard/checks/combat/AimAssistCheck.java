@@ -12,44 +12,39 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AimAssist / smooth-aimbot detection.
- *
- * AimAssist rotates the player toward the target by a near-constant step
- * each tick. A real mouse produces highly irregular rotation deltas; a
- * fixed-step assist produces many non-zero deltas with extremely low
- * variance. Evaluated on the rotation history captured every move tick.
+ * AimAssist / smooth-aimbot — analysed on the REAL packet rotation history.
+ * A constant-step assist produces many non-zero yaw deltas with extremely
+ * low variance and a measurable repeating granularity (GCD). A human mouse
+ * never holds that.
  */
 public final class AimAssistCheck extends CombatCheck {
 
     public AimAssistCheck(KoalaGuard plugin) {
-        super(plugin, "aimassist", "Robotic constant-step aim correction");
+        super(plugin, "aimassist", "Robotic constant-step aim");
     }
 
     @Override
-    public void handle(PlayerData data, Player attacker, Entity victim, EntityDamageByEntityEvent e) {
-        List<Float> nonZero = new ArrayList<>();
-        for (Float y : data.yawSamples) if (y != null && y > 0.06f && y < 35f) nonZero.add(y);
-        if (nonZero.size() < 16) return;
+    public void handle(PlayerData d, Player attacker, Entity victim, EntityDamageByEntityEvent e) {
+        List<Float> all = d.yawDeltas(30);
+        List<Float> nz = new ArrayList<>();
+        for (Float f : all) if (f > 0.06f && f < 30f) nz.add(f);
+        if (nz.size() < 16) return;
 
-        double mean = MathUtil.average(nonZero);
-        double var = MathUtil.variance(nonZero);
-        int dupes = MathUtil.duplicates(scaled(nonZero));
+        double mean = MathUtil.average(nz);
+        double var = MathUtil.variance(nz);
 
-        // Constant-rate turn: meaningful average movement, almost no variance.
-        if (mean > 0.25 && mean < 14 && var < 1.4 && dupes >= 5) {
-            double buf = data.addBuffer(k("b"), 3.0, 9.0);
+        // repeating granularity
+        double g = nz.get(0);
+        for (Float f : nz) g = MathUtil.gcd(g, f);
+
+        if (mean > 0.25 && mean < 12 && var < 1.3 && g > 0.05 && g < 6) {
+            double buf = d.addBuffer(k("b"), 3.0, 9.0);
             if (buf >= 6.0) {
-                fail(data, attacker, String.format("constant-aim mean=%.2f° var=%.3f", mean, var));
-                data.setBuffer(k("b"), 1.0);
+                fail(d, attacker, String.format("constant-aim mean=%.2f var=%.3f gcd=%.3f", mean, var, g));
+                d.setBuffer(k("b"), 1.0);
             }
         } else {
-            data.subBuffer(k("b"), 1.0);
+            d.subBuffer(k("b"), 1.0);
         }
-    }
-
-    private List<Long> scaled(List<Float> in) {
-        List<Long> out = new ArrayList<>(in.size());
-        for (Float f : in) out.add(Math.round(f * 100.0));
-        return out;
     }
 }
