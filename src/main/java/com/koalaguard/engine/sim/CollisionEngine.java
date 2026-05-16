@@ -65,7 +65,17 @@ public final class CollisionEngine {
                 for (int bz = minZ; bz <= maxZ; bz++) {
                     Block b = w.getBlockAt(bx, by, bz);
                     if (!collidable(b)) continue;
-                    if (body.intersects(b.getBoundingBox())) return true;
+                    var box = b.getBoundingBox();
+                    // Only a (near) FULL cube counts. Slabs, stairs, panes,
+                    // fences, walls, carpets, snow layers, farmland etc. have
+                    // partial collision boxes the player legitimately overlaps
+                    // at the edges — judging those would false-positive Phase
+                    // (which sets the player back), so they are excluded.
+                    boolean fullCube =
+                            (box.getMaxX() - box.getMinX()) >= 0.98 &&
+                            (box.getMaxY() - box.getMinY()) >= 0.98 &&
+                            (box.getMaxZ() - box.getMinZ()) >= 0.98;
+                    if (fullCube && body.intersects(box)) return true;
                 }
             }
         }

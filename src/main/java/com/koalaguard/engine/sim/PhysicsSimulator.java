@@ -33,7 +33,15 @@ public final class PhysicsSimulator {
             return r;
         }
 
-        boolean onGround = prev.simGround || prev.clientGround;
+        // SERVER-AUTHORITATIVE ground: the client onGround flag is spoofable
+        // (fly/NoFall send onGround=true while airborne to get the lenient
+        // band). We believe it ONLY when server geometry agrees the player is
+        // genuinely near ground — which also avoids a false positive when the
+        // footprint collision scan narrowly misses on a slab/stair edge.
+        double ph = player.isSneaking() ? 1.5 : 1.8;
+        boolean nearPrev = CollisionEngine.nearGround(
+                player.getWorld(), prev.x, prev.y, prev.z, ph);
+        boolean onGround = prev.simGround || (prev.clientGround && nearPrev);
         double slip = onGround ? cur.groundSlipperiness : 0.6;
 
         // ── horizontal envelope ──
@@ -79,10 +87,11 @@ public final class PhysicsSimulator {
         }
 
         r.expectedDy = expectedDy;
-        if (prev.simGround || prev.clientGround) {
-            // could be standing (≈0), stepping (≤0.6), or jumping (jumpImpulse)
+        if (onGround) {
+            // could be standing (≈0), auto-stepping (vanilla max-up-step 0.6),
+            // or jumping (jumpImpulse). Cover the step so stairs/slabs are FP-free.
             r.dyLow  = -0.5;
-            r.dyHigh = jumpImpulse + 0.10;
+            r.dyHigh = Math.max(jumpImpulse, 0.6) + 0.10;
         } else {
             r.dyLow  = expectedDy - 0.05;
             r.dyHigh = expectedDy + 0.05;
