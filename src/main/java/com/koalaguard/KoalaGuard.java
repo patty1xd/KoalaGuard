@@ -14,6 +14,8 @@ import com.koalaguard.manager.ViolationManager;
 import com.koalaguard.processor.CombatProcessor;
 import com.koalaguard.processor.MovementTask;
 import com.koalaguard.processor.PacketProcessor;
+import com.koalaguard.processor.SetbackManager;
+import com.koalaguard.processor.TransactionManager;
 import com.koalaguard.util.ServerMetrics;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.Bukkit;
@@ -32,6 +34,8 @@ public final class KoalaGuard extends JavaPlugin {
     private AlertManager alertManager;
     private ViolationManager violationManager;
     private CheckManager checkManager;
+    private TransactionManager transactionManager;
+    private SetbackManager setbackManager;
 
     @Override
     public void onLoad() {
@@ -61,6 +65,9 @@ public final class KoalaGuard extends JavaPlugin {
         checkManager = new CheckManager(this);
         checkManager.registerAll();
 
+        transactionManager = new TransactionManager(this);
+        setbackManager = new SetbackManager(this);
+
         // Packet capture (netty thread) — records ground truth into PlayerData.
         // Priority is carried by PacketListenerAbstract's constructor, so the
         // single-arg (PacketListenerCommon) overload is the correct one.
@@ -68,6 +75,7 @@ public final class KoalaGuard extends JavaPlugin {
         PacketEvents.getAPI().init();
 
         // Main-thread evaluators consume the packet-accurate model.
+        transactionManager.runTaskTimer(this, 1L, 1L);
         new MovementTask(this).runTaskTimer(this, 1L, 1L);
         Bukkit.getPluginManager().registerEvents(new CombatProcessor(this), this);
         Bukkit.getPluginManager().registerEvents(new StateListener(this), this);
@@ -102,4 +110,6 @@ public final class KoalaGuard extends JavaPlugin {
     public AlertManager getAlertManager()       { return alertManager; }
     public ViolationManager getViolationManager() { return violationManager; }
     public CheckManager getCheckManager()       { return checkManager; }
+    public TransactionManager getTransactionManager() { return transactionManager; }
+    public SetbackManager getSetbackManager()   { return setbackManager; }
 }
