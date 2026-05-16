@@ -88,6 +88,12 @@ public abstract class Check {
         plugin.getViolationManager().reward(this, data);
     }
 
+    /** Flag AND lagback the player to their last prediction-valid position. */
+    protected void failAndSetback(PlayerData data, Player player, String detail) {
+        fail(data, player, detail);
+        plugin.getSetbackManager().requestSetback(data, player, getName() + ": " + detail);
+    }
+
     protected boolean debug() {
         return plugin.getConfig().getBoolean("debug", false);
     }
