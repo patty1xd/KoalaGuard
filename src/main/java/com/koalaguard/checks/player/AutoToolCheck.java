@@ -8,12 +8,11 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.block.BlockDamageEvent;
-import org.bukkit.event.player.PlayerItemHeldEvent;
 
 /**
- * AutoTool detection — a hotbar slot switch landing within the same tick a
- * block starts being mined. Meteor AutoTool swaps to the optimal tool the
- * instant you begin digging; a human cannot select-then-dig that fast.
+ * AutoTool — packet model. Compares the TRUE held-slot-change packet time to
+ * the TRUE START_DIGGING packet time. AutoTool swaps to the optimal tool the
+ * instant digging begins; a human cannot select-then-dig within one tick.
  */
 public final class AutoToolCheck extends ListenerCheck {
 
@@ -21,31 +20,27 @@ public final class AutoToolCheck extends ListenerCheck {
         super(plugin, "autotool", CheckCategory.PLAYER, "Auto-switching to the optimal tool on dig");
     }
 
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onSlot(PlayerItemHeldEvent event) {
-        PlayerData d = plugin.getDataManager().get(event.getPlayer());
-        if (d != null) d.setLong(k("slot"), System.currentTimeMillis());
-    }
-
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDig(BlockDamageEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         if (isExempt(player)) return;
-        PlayerData data = plugin.getDataManager().get(player);
-        if (data == null) return;
+        PlayerData d = plugin.getDataManager().get(player);
+        if (d == null) return;
 
-        long slot = data.getLong(k("slot"));
-        if (slot == 0) return;
-        long gap = System.currentTimeMillis() - slot;
+        long slot = d.lastSlotChangeMs;
+        long dig = d.lastDiggingStartMs;
+        if (slot == 0 || dig == 0) return;
+
+        long gap = Math.abs(dig - slot);
         if (gap < 55) {
-            int s = data.incInt(k("s"));
+            int s = d.incInt(k("s"));
             if (s >= 3) {
-                fail(data, player, "switch→dig " + gap + "ms streak=" + s);
-                data.setInt(k("s"), 0);
+                fail(d, player, "switch↔dig " + gap + "ms streak=" + s);
+                d.setInt(k("s"), 0);
             }
         } else {
-            data.setInt(k("s"), 0);
+            d.setInt(k("s"), 0);
         }
     }
 }

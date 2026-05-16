@@ -10,11 +10,13 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockDamageEvent;
 
 /**
- * SpeedMine detection — breaking a block well below its hardness-derived
- * minimum break time (accounts for tool, Efficiency, Haste, Fatigue).
+ * SpeedMine — packet model. The dig START time comes from the TRUE
+ * START_DIGGING packet (captured on the netty thread, not the laggy Bukkit
+ * BlockDamageEvent); the break completion comes from BlockBreakEvent. Flags
+ * a break far below the hardness-derived minimum (tool/Efficiency/Haste
+ * aware).
  */
 public final class SpeedMineCheck extends ListenerCheck {
 
@@ -23,37 +25,29 @@ public final class SpeedMineCheck extends ListenerCheck {
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onStart(BlockDamageEvent event) {
-        if (event.getPlayer().getGameMode() == GameMode.CREATIVE) return;
-        PlayerData d = plugin.getDataManager().get(event.getPlayer());
-        if (d != null && d.getLong(k("start")) == 0) d.setLong(k("start"), System.currentTimeMillis());
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         if (isExempt(player) || player.getGameMode() == GameMode.CREATIVE) return;
-        PlayerData data = plugin.getDataManager().get(player);
-        if (data == null) return;
+        PlayerData d = plugin.getDataManager().get(player);
+        if (d == null) return;
 
-        long start = data.getLong(k("start"));
-        data.setLong(k("start"), 0);
+        long start = d.lastDiggingStartMs;
         if (start == 0) return;
-
         long elapsed = System.currentTimeMillis() - start;
+
         long min = BreakTimeUtil.minBreakMs(event.getBlock(), player);
         if (min <= 50) return;
 
         if (elapsed < min * 0.40) {
-            int s = data.incInt(k("s"));
+            int s = d.incInt(k("s"));
             if (s >= 2) {
-                fail(data, player, String.format("%s in %dms (min %dms) streak=%d",
+                fail(d, player, String.format("%s in %dms (min %dms) streak=%d",
                         event.getBlock().getType(), elapsed, min, s));
-                data.setInt(k("s"), 0);
+                d.setInt(k("s"), 0);
             }
         } else {
-            data.setInt(k("s"), 0);
+            d.setInt(k("s"), 0);
         }
     }
 }
