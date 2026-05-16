@@ -171,7 +171,7 @@ public final class AutoTotemCheck extends ListenerCheck {
     private void analyzeConsistency(Player player, PlayerData d) {
 
         if (d.totemReequipSamples == null) {
-            d.totemReequipSamples = new ArrayDeque<>();
+            d.totemSamples = new ArrayDeque<>();
         }
 
         if (d.totemReequipSamples.size() < 6) {
@@ -204,7 +204,7 @@ public final class AutoTotemCheck extends ListenerCheck {
     private void recordSample(PlayerData d, long value) {
 
         if (d.totemReequipSamples == null) {
-            d.totemReequipSamples = new ArrayDeque<>();
+            d.totemSamples = new ArrayDeque<>();
         }
 
         d.totemReequipSamples.addLast(value);
