@@ -6,6 +6,7 @@ import com.koalaguard.engine.check.CheckContext;
 import com.koalaguard.engine.check.SimCheck;
 import com.koalaguard.engine.packet.PacketKind;
 import com.koalaguard.engine.state.InventoryState;
+import org.bukkit.Material;
 
 import java.util.Map;
 import java.util.UUID;
@@ -61,8 +62,10 @@ public final class AutoTotemCheck extends SimCheck {
             return;
         }
 
-        // Re-equip edge: a totem is back in a hand after the consume.
-        if (inv.hasTotem()) {
+        // Re-equip edge: a totem is back in the OFF HAND after the consume.
+        // Keyed strictly on the off hand so a main-hand totem (carrying two)
+        // can never be mistaken for an instant re-equip.
+        if (inv.offHand == Material.TOTEM_OF_UNDYING) {
             long consume = inv.totemConsumedTick;
 
             boolean swap = ctx.state.log.existsSinceTick(consume, p ->

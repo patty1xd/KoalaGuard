@@ -13,26 +13,31 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * General interaction-chain validator. A hand's contents may only change as
- * the RESULT of a legal client packet sequence:
- *   • main hand  ⟵ HELD_ITEM (hotbar) or CLICK_WINDOW (item move),
- *   • off  hand  ⟵ DIGGING/SWAP_ITEM_WITH_OFFHAND or CLICK_WINDOW.
+ * Off-hand interaction-chain validator (generalised AutoTotem).
  *
- * A hand transition with NO causing packet in the reconstructed stream is an
- * illegal sequence (packet-only inventory manipulation). Server-side mutations
- * (pickups, durability, plugins) are rare and non-persistent, so the high
- * persistence requirement keeps this false-positive free. The totem cycle is
- * left to {@link AutoTotemCheck} (modular separation).
+ * In vanilla, an item can only ENTER the off hand through an observable client
+ * packet: a SWAP_ITEM_WITH_OFFHAND (F key) or a CLICK_WINDOW (inventory move).
+ * Pick-ups never auto-fill the off hand. So: an item APPEARING in the off hand
+ * with no swap/click in the reconstructed stream is an illegal sequence.
+ *
+ * Deliberately scoped to be false-positive proof:
+ *  • only APPEARANCE (→ real item) is judged — item DISappearance (consume /
+ *    break / clear) is a legitimate server-side mutation and is never flagged;
+ *  • the totem is left to {@link AutoTotemCheck} (modular separation);
+ *  • the very first observed inventory state is a baseline, never judged;
+ *  • main-hand transitions are intentionally NOT validated here — they have
+ *    too many legitimate server-side causes (buckets, crossbows, food, tool
+ *    breakage, pickup-to-empty-hand) to validate from packets without FPs.
  */
 public final class InventoryChainCheck extends SimCheck {
 
-    private static final class M { long mainSeen = -1, offSeen = -1; }
+    private static final class M { long offSeen = Long.MIN_VALUE; }
 
     private final Map<UUID, M> mem = new ConcurrentHashMap<>();
 
     public InventoryChainCheck(KoalaGuard plugin) {
         super(plugin, "inventorychain", CheckCategory.COMBAT,
-                "Illegal hand transition (no interaction chain)");
+                "Off-hand item appeared with no interaction chain");
     }
 
     @Override
@@ -42,42 +47,33 @@ public final class InventoryChainCheck extends SimCheck {
         UUID id = ctx.data.getUuid();
         M m = mem.computeIfAbsent(id, k -> new M());
 
-        // ── off-hand transition legality ──
-        if (inv.offHandChangedTick > m.offSeen) {
-            long from = m.offSeen < 0 ? inv.offHandChangedTick - 1 : m.offSeen;
-            m.offSeen = inv.offHandChangedTick;
-            boolean totemCycle = inv.offHand == Material.TOTEM_OF_UNDYING
-                    && inv.awaitingTotemTransition;
-            if (!totemCycle) {
-                boolean legal = ctx.state.log.existsSinceTick(from, p ->
-                        p.kind == PacketKind.CLICK_WINDOW
-                        || (p.kind == PacketKind.DIGGING
-                            && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA)));
-                if (!legal) {
-                    diverge(ctx, cfgD("score", 4.0), cfgD("threshold", 12.0),
-                            cfgI("min-streak", 4),
-                            "offhand → " + inv.offHand + " with no swap/click chain", false);
-                } else {
-                    clean(ctx, 1.0);
-                }
-            }
-        }
+        if (inv.offHandChangedTick <= m.offSeen) return;     // nothing new
 
-        // ── main-hand transition legality ──
-        if (inv.mainHandChangedTick > m.mainSeen) {
-            long from = m.mainSeen < 0 ? inv.mainHandChangedTick - 1 : m.mainSeen;
-            m.mainSeen = inv.mainHandChangedTick;
-            boolean legal = ctx.state.log.existsSinceTick(from, p ->
-                    p.kind == PacketKind.HELD_ITEM
-                    || p.kind == PacketKind.CLICK_WINDOW
-                    || p.kind == PacketKind.CLOSE_WINDOW);
-            if (!legal) {
-                diverge(ctx, cfgD("score", 4.0), cfgD("threshold", 12.0),
-                        cfgI("min-streak", 5),
-                        "mainhand → " + inv.mainHand + " with no held/click chain", false);
-            } else {
-                clean(ctx, 1.0);
-            }
+        // Baseline: never judge the first inventory snapshot we ever see.
+        if (m.offSeen == Long.MIN_VALUE) {
+            m.offSeen = inv.offHandChangedTick;
+            return;
+        }
+        long from = m.offSeen;
+        m.offSeen = inv.offHandChangedTick;
+
+        Material now = inv.offHand;
+        // DISappearance / clear → legitimate server mutation, never flagged.
+        if (now == Material.AIR) { clean(ctx, 1.0); return; }
+        // Totem cycle is owned by AutoTotemCheck.
+        if (now == Material.TOTEM_OF_UNDYING || inv.awaitingTotemTransition) return;
+
+        boolean legal = ctx.state.log.existsSinceTick(from, p ->
+                p.kind == PacketKind.CLICK_WINDOW
+                || (p.kind == PacketKind.DIGGING
+                    && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA)));
+
+        if (!legal) {
+            diverge(ctx, cfgD("score", 4.0), cfgD("threshold", 12.0),
+                    cfgI("min-streak", 4),
+                    "offhand → " + now + " appeared with no swap/click chain", false);
+        } else {
+            clean(ctx, 1.5);
         }
     }
 
