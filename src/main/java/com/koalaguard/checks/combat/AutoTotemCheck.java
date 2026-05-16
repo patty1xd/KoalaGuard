@@ -4,36 +4,20 @@ import com.koalaguard.KoalaGuard;
 import com.koalaguard.check.CheckCategory;
 import com.koalaguard.check.ListenerCheck;
 import com.koalaguard.data.PlayerData;
-import com.koalaguard.util.MathUtil;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
-/**
- * AutoTotem — robust totem-cycle model.
- *
- * Cycle: a totem pops ({@link EntityResurrectEvent}) → the off/main hand is
- * polled every tick until a totem returns. The re-equip time is ping
- * compensated (transaction RTT) and compared to what a human can do
- * (notice ≈250 ms + open/press + click ≈ 400-900 ms). Signals:
- *   A) a single ping-comp re-equip far faster than humanly possible,
- *   B) low std-dev of re-equip times across cycles (bot consistency),
- *   C) a totem-to-offhand window-click / swap fired right after the pop
- *      while no inventory was meaningfully open (packet corroboration),
- *   D) client brand / plugin message advertises an autototem mod.
- *
- * The legit "carrying a totem STACK" case (hand still holds a totem the very
- * next tick) is skipped — it is unmeasurable and would false-positive.
- *
- * NOTE: if you test as OP, ensure you do NOT have `koalaguard.bypass`.
- */
 public final class AutoTotemCheck extends ListenerCheck {
+
+    private static final long MAX_WAIT_MS = 2000L;
 
     public AutoTotemCheck(KoalaGuard plugin) {
         super(plugin, "autototem", CheckCategory.COMBAT, "Automated totem re-equipping");
@@ -43,100 +27,257 @@ public final class AutoTotemCheck extends ListenerCheck {
     public void onPop(EntityResurrectEvent event) {
         if (!isEnabled()) return;
         if (!(event.getEntity() instanceof Player player)) return;
+
         PlayerData d = plugin.getDataManager().get(player);
-        if (d == null) return;
+        if (d == null || isExempt(player)) return;
 
-        boolean exempt = isExempt(player);
-        if (debug()) plugin.getLogger().info("[AutoTotem] " + player.getName()
-                + " totem popped (exempt=" + exempt + ", awaiting=" + d.awaitingTotem + ")");
-        if (exempt) return;
-
-        if (d.flagBadBrand) {
-            fail(d, player, "client brand advertises autototem: " + d.packetBrand);
-        }
         if (d.awaitingTotem) return;
 
-        final long pop = System.currentTimeMillis();
-        d.totemPopMs = pop;
-        d.awaitingTotem = true;
+        ItemStack off = player.getInventory().getItemInOffHand();
 
-        final int[] tick = {0};
-        final boolean[] sawEmpty = {false};
-        final BukkitTask[] task = new BukkitTask[1];
-        task[0] = plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
-            if (!player.isOnline() || !d.isAlive()) { d.awaitingTotem = false; task[0].cancel(); return; }
-            tick[0]++;
-            boolean hasTotem =
-                    player.getInventory().getItemInOffHand().getType() == Material.TOTEM_OF_UNDYING
-                 || player.getInventory().getItemInMainHand().getType() == Material.TOTEM_OF_UNDYING;
+        // distinguish stacked totems from instant refill
+        boolean stackedTotem =
+                off.getType() == Material.TOTEM_OF_UNDYING &&
+                off.getAmount() > 1;
 
-            if (tick[0] == 1 && hasTotem) {
-                // hand still holds a totem next tick → a STACK was carried,
-                // not a re-equip. Unmeasurable; abort to avoid a false flag.
-                if (debug()) plugin.getLogger().info("[AutoTotem] " + player.getName()
-                        + " skipped (totem stack — not a measurable cycle)");
-                d.awaitingTotem = false; task[0].cancel();
-                return;
+        if (stackedTotem) {
+            if (debug()) {
+                plugin.getLogger().info("[AutoTotem] " + player.getName()
+                        + " skipped stacked totem");
             }
-            if (!hasTotem) { sawEmpty[0] = true; }
-
-            if (sawEmpty[0] && hasTotem) {
-                d.awaitingTotem = false; task[0].cancel();
-                process(player, d, System.currentTimeMillis() - pop, pop);
-            } else if (tick[0] >= 40) {            // 2 s — gave up (manual / out of totems)
-                if (debug()) plugin.getLogger().info("[AutoTotem] " + player.getName()
-                        + " no re-equip within 2s (manual / none)");
-                d.awaitingTotem = false; task[0].cancel();
-            }
-        }, 1L, 1L);
-    }
-
-    private void process(Player player, PlayerData d, long delay, long pop) {
-        if (plugin.getSafetyManager().shouldSuppressBasic(d, player)) {
-            if (debug()) plugin.getLogger().info("[AutoTotem] " + player.getName()
-                    + " cycle suppressed (server unstable)");
             return;
         }
 
-        int ping = d.transactionPing > 0 ? d.transactionPing : plugin.getMetrics().pingMs(player);
-        long comp = Math.max(0, delay - (ping > 0 ? ping / 2L : 0));
+        final long popNano = System.nanoTime();
+
+        d.awaitingTotem = true;
+        d.totemPopMs = System.currentTimeMillis();
+
+        final int[] ticks = {0};
+        final boolean[] sawEmpty = {false};
+
+        final BukkitTask[] task = new BukkitTask[1];
+
+        task[0] = plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+
+            if (!player.isOnline() || !d.isAlive()) {
+                cleanup(d, task[0]);
+                return;
+            }
+
+            ticks[0]++;
+
+            boolean hasTotem = hasTotem(player);
+
+            if (!hasTotem) {
+                sawEmpty[0] = true;
+            }
+
+            // wait until we ACTUALLY observe empty state first
+            if (sawEmpty[0] && hasTotem) {
+
+                cleanup(d, task[0]);
+
+                long elapsedMs =
+                        (System.nanoTime() - popNano) / 1_000_000L;
+
+                processCycle(player, d, elapsedMs, ticks[0]);
+
+                return;
+            }
+
+            if ((System.nanoTime() - popNano) / 1_000_000L > MAX_WAIT_MS) {
+                cleanup(d, task[0]);
+            }
+
+        }, 1L, 1L);
+    }
+
+    private void processCycle(Player player,
+                              PlayerData d,
+                              long elapsedMs,
+                              int ticks) {
+
+        if (plugin.getSafetyManager().shouldSuppressBasic(d, player)) {
+            return;
+        }
+
+        int ping = getReliablePing(player, d);
+
+        // conservative compensation
+        long compensated =
+                Math.max(0L, elapsedMs - Math.min(150L, ping / 3L));
 
         boolean packetCorroborated =
-                (d.lastClickWindowMs >= pop && d.lastClickWindowMs - pop < 250)
-             || (d.lastOffhandSwapMs >= pop && d.lastOffhandSwapMs - pop < 250);
+                wasInventoryActionNearPop(d);
 
-        d.totemReequipSamples.addLast(comp);
-        while (d.totemReequipSamples.size() > 20) d.totemReequipSamples.removeFirst();
+        boolean impossibleSpeed =
+                compensated <= 40L;
 
-        if (debug()) plugin.getLogger().info(String.format(
-                "[AutoTotem] %s cycle: raw=%dms comp=%dms ping=%d corroborated=%b samples=%d",
-                player.getName(), delay, comp, ping, packetCorroborated, d.totemReequipSamples.size()));
+        boolean suspiciousSpeed =
+                compensated <= 80L;
 
-        long minMs = cfgL("min-reequip-ms", 250L);
+        if (debug()) {
+            plugin.getLogger().info(
+                    "[AutoTotem] " + player.getName()
+                    + " raw=" + elapsedMs
+                    + "ms comp=" + compensated
+                    + "ms ticks=" + ticks
+                    + " ping=" + ping
+                    + " corroborated=" + packetCorroborated
+            );
+        }
 
-        // A — impossibly fast re-equip
-        if (comp <= minMs) {
-            int need = packetCorroborated ? 1 : 2;
-            int s = d.incInt(k("fast"));
-            if (s >= need) {
-                fail(d, player, "re-equip " + comp + "ms (ping-comp, raw " + delay + "ms)"
-                        + (packetCorroborated ? " + click/swap packet" : "") + " streak=" + s);
+        recordSample(d, compensated);
+
+        // severe
+        if (impossibleSpeed && packetCorroborated) {
+
+            int vl = d.incInt(k("impossible"));
+
+            if (vl >= 1) {
+                fail(d, player,
+                        "impossible autototem response "
+                        + compensated + "ms");
+            }
+
+            return;
+        }
+
+        // suspicious repeated
+        if (suspiciousSpeed) {
+
+            int vl = d.incInt(k("fast"));
+
+            if (packetCorroborated) {
+                vl += 1;
+            }
+
+            if (vl >= 3) {
+                fail(d, player,
+                        "fast re-equip "
+                        + compensated + "ms");
                 d.setInt(k("fast"), 0);
             }
+
         } else {
             d.setInt(k("fast"), 0);
         }
 
-        // B — machine-consistent timing across cycles
-        if (d.totemReequipSamples.size() >= cfgI("sample-size", 4)) {
-            List<Long> s = new ArrayList<>(d.totemReequipSamples);
-            double mean = MathUtil.average(s);
-            double sd = MathUtil.standardDeviation(s);
-            if (sd < cfgD("max-stddev", 60.0) && mean < cfgD("max-mean-ms", 600.0)) {
-                fail(d, player, String.format("consistent re-equip mean=%.0fms sd=%.1f n=%d",
-                        mean, sd, s.size()));
-                d.totemReequipSamples.clear();
+        // consistency analysis
+        analyzeConsistency(player, d);
+    }
+
+    private void analyzeConsistency(Player player, PlayerData d) {
+
+        if (d.totemSamples == null) {
+            d.totemSamples = new ArrayDeque<>();
+        }
+
+        if (d.totemSamples.size() < 6) {
+            return;
+        }
+
+        double mean = mean(d.totemSamples);
+        double deviation = deviation(d.totemSamples, mean);
+
+        // modern cheats randomize slightly
+        // so look for unnaturally stable low reactions
+        if (mean < 350.0 && deviation < 35.0) {
+
+            int vl = d.incInt(k("consistency"));
+
+            if (vl >= 2) {
+                fail(d, player,
+                        String.format(
+                                "consistent autototem mean=%.1f sd=%.1f",
+                                mean,
+                                deviation
+                        ));
+
+                d.setInt(k("consistency"), 0);
+                d.totemSamples.clear();
             }
         }
+    }
+
+    private void recordSample(PlayerData d, long value) {
+
+        if (d.totemSamples == null) {
+            d.totemSamples = new ArrayDeque<>();
+        }
+
+        d.totemSamples.addLast(value);
+
+        while (d.totemSamples.size() > 12) {
+            d.totemSamples.removeFirst();
+        }
+    }
+
+    private boolean wasInventoryActionNearPop(PlayerData d) {
+
+        long now = System.currentTimeMillis();
+
+        return
+                now - d.lastClickWindowMs < 150L ||
+                now - d.lastOffhandSwapMs < 150L;
+    }
+
+    private int getReliablePing(Player player, PlayerData d) {
+
+        int trans = d.transactionPing;
+        int fallback = plugin.getMetrics().pingMs(player);
+
+        if (trans <= 0) {
+            return fallback;
+        }
+
+        if (fallback <= 0) {
+            return trans;
+        }
+
+        return (trans + fallback) / 2;
+    }
+
+    private boolean hasTotem(Player player) {
+
+        return
+                player.getInventory().getItemInOffHand().getType()
+                        == Material.TOTEM_OF_UNDYING
+                ||
+                player.getInventory().getItemInMainHand().getType()
+                        == Material.TOTEM_OF_UNDYING;
+    }
+
+    private void cleanup(PlayerData d, BukkitTask task) {
+
+        d.awaitingTotem = false;
+
+        if (task != null) {
+            task.cancel();
+        }
+    }
+
+    private double mean(Deque<Long> values) {
+
+        double sum = 0.0;
+
+        for (long v : values) {
+            sum += v;
+        }
+
+        return sum / values.size();
+    }
+
+    private double deviation(Deque<Long> values, double mean) {
+
+        double sum = 0.0;
+
+        for (long v : values) {
+            double diff = v - mean;
+            sum += diff * diff;
+        }
+
+        return Math.sqrt(sum / values.size());
     }
 }
