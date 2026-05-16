@@ -94,6 +94,24 @@ public abstract class Check {
         plugin.getSetbackManager().requestSetback(data, player, getName() + ": " + detail);
     }
 
+    /**
+     * Flag WITHOUT re-applying the movement-grace suppression. Engine checks
+     * already make their own (correct, per-category) instability decision via
+     * the CheckContext before they ever call this, so re-running the broad
+     * {@code shouldSuppress} here would, for combat checks, silently drop every
+     * flag during a fight (the attacker just took damage). Exemption + enabled
+     * are still enforced.
+     */
+    protected void failResolved(PlayerData data, Player player, String detail) {
+        if (data == null || !isEnabled() || isExempt(player)) return;
+        plugin.getViolationManager().fail(this, data, player, detail == null ? "" : detail);
+    }
+
+    protected void failResolvedAndSetback(PlayerData data, Player player, String detail) {
+        failResolved(data, player, detail);
+        plugin.getSetbackManager().requestSetback(data, player, getName() + ": " + detail);
+    }
+
     protected boolean debug() {
         return plugin.getConfig().getBoolean("debug", false);
     }
