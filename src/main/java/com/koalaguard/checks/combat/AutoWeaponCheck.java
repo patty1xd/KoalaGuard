@@ -9,23 +9,16 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.player.PlayerItemHeldEvent;
 
 /**
- * AutoWeapon detection — a hotbar slot change followed by a melee hit in the
- * same tick (≤ ~55 ms). A human cannot switch and attack that fast; the
- * cheat scans for the best weapon and hits in one tick.
+ * AutoWeapon — packet model. Compares the TRUE held-slot-change packet time
+ * to the TRUE attack packet time (both captured on the netty thread). A
+ * human cannot scroll/select then attack within one tick.
  */
 public final class AutoWeaponCheck extends ListenerCheck {
 
     public AutoWeaponCheck(KoalaGuard plugin) {
         super(plugin, "autoweapon", CheckCategory.COMBAT, "Switching weapon and hitting in one tick");
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onSlot(PlayerItemHeldEvent event) {
-        PlayerData d = plugin.getDataManager().get(event.getPlayer());
-        if (d != null) d.setLong(k("slot"), System.currentTimeMillis());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -34,20 +27,22 @@ public final class AutoWeaponCheck extends ListenerCheck {
         if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
         if (!(event.getDamager() instanceof Player player)) return;
         if (isExempt(player)) return;
-        PlayerData data = plugin.getDataManager().get(player);
-        if (data == null) return;
+        PlayerData d = plugin.getDataManager().get(player);
+        if (d == null) return;
 
-        long slotMs = data.getLong(k("slot"));
-        if (slotMs == 0) return;
-        long gap = System.currentTimeMillis() - slotMs;
-        if (gap < 55) {
-            int s = data.incInt(k("s"));
+        long slot = d.lastSlotChangeMs;
+        long atk = d.lastAttackPacketMs;
+        if (slot == 0 || atk == 0) return;
+
+        long gap = atk - slot;
+        if (gap >= 0 && gap < 55) {
+            int s = d.incInt(k("s"));
             if (s >= 3) {
-                fail(data, player, "switch→hit " + gap + "ms streak=" + s);
-                data.setInt(k("s"), 0);
+                fail(d, player, "switch→hit " + gap + "ms streak=" + s);
+                d.setInt(k("s"), 0);
             }
         } else {
-            data.setInt(k("s"), 0);
+            d.setInt(k("s"), 0);
         }
     }
 }
