@@ -7,42 +7,35 @@ import org.bukkit.entity.Player;
 import org.bukkit.potion.PotionEffectType;
 
 /**
- * AntiHunger detection.
- *
- * AntiHunger cancels the START_SPRINTING packet so the server stops counting
- * sprint exhaustion while the player still physically sprints. The result is
- * a measurable desync: sprint-level horizontal speed with the sprint flag
- * reported false, sustained for ~1 second on the ground.
+ * AntiHunger — cancels the START_SPRINTING packet so the server stops
+ * counting sprint exhaustion while the player physically sprints. We compare
+ * the TRUE packet sprint flag (ENTITY_ACTION) against actual sprint-level
+ * ground speed; a long sustained desync is the signature.
  */
 public final class AntiHungerCheck extends MovementCheck {
 
     private static final double SPRINT_SPEED = 0.255;
 
     public AntiHungerCheck(KoalaGuard plugin) {
-        super(plugin, "antihunger", "Sprinting with the sprint flag suppressed");
+        super(plugin, "antihunger", "Suppressing the sprint packet while sprinting");
     }
 
     @Override
-    public void handle(PlayerData data, Player player) {
-        if (data.exemptFlying || data.exemptVehicle || data.exemptGliding || data.exemptLiquid
-                || data.exemptRiptide) { data.setInt(k("s"), 0); return; }
-        if (player.hasPotionEffect(PotionEffectType.SPEED)) { data.setInt(k("s"), 0); return; }
+    public void handle(PlayerData d, Player player) {
+        if (d.exemptFlying || d.exemptVehicle || d.exemptGliding || d.exemptLiquid
+                || d.exemptRiptide || !d.onGround) { d.setInt(k("s"), 0); return; }
+        if (player.hasPotionEffect(PotionEffectType.SPEED)) { d.setInt(k("s"), 0); return; }
         long now = System.currentTimeMillis();
-        if (now - data.lastDamageMs < 800 || now - data.lastVelocityMs < 900) {
-            data.setInt(k("s"), 0);
-            return;
-        }
-        if (!data.onGround) { data.setInt(k("s"), 0); return; }
+        if (now - d.lastDamageMs < 900 || now - d.lastVelocityMs < 1000) { d.setInt(k("s"), 0); return; }
 
-        if (data.deltaXZ >= SPRINT_SPEED && !player.isSprinting() && !player.isSneaking()) {
-            int s = data.incInt(k("s"));
-            if (s >= 24) {
-                fail(data, player, String.format("speed=%.3f sprintFlag=false streak=%d",
-                        data.deltaXZ, s));
-                data.setInt(k("s"), 0);
+        if (d.deltaXZ >= SPRINT_SPEED && !d.sprinting && !d.sneaking) {
+            int s = d.incInt(k("s"));
+            if (s >= 30) {
+                fail(d, player, String.format("speed=%.3f sprintPacket=false streak=%d", d.deltaXZ, s));
+                d.setInt(k("s"), 0);
             }
         } else {
-            data.setInt(k("s"), 0);
+            d.setInt(k("s"), 0);
         }
     }
 }

@@ -6,13 +6,11 @@ import com.koalaguard.data.PlayerData;
 import org.bukkit.entity.Player;
 
 /**
- * Timer / game-speed detection.
- *
- * The client sends ~20 position updates per second (one per tick). Timer
- * hacks accelerate the client clock so more updates arrive per real second,
- * letting the player move and attack faster. We use a leaking-balance model:
- * each position packet credits one tick of "time"; if the player banks far
- * more ticks than real time allows, they are running a timer.
+ * Timer / game-speed — counts the player's REAL movement packets per second
+ * (captured on the netty thread). Vanilla sends ~20/s whether moving or
+ * idle; a timer raises that. A leaking balance only accumulates when the
+ * rate is consistently above vanilla, so a lag burst (which lowers the rate)
+ * can never false-positive.
  */
 public final class TimerCheck extends MovementCheck {
 
@@ -21,30 +19,21 @@ public final class TimerCheck extends MovementCheck {
     }
 
     @Override
-    public void handle(PlayerData data, Player player) {
-        if (data.exemptVehicle || data.exemptRiptide || data.exemptGliding) return;
+    public void handle(PlayerData d, Player player) {
+        if (d.exemptVehicle || d.exemptGliding || d.exemptRiptide) { d.setBuffer(k("bal"), 0); return; }
         long now = System.currentTimeMillis();
-        long last = data.getLong(k("last"));
-        data.setLong(k("last"), now);
-        if (last == 0) return;
+        long cnt = d.flyingTimes.stream().filter(t -> now - t <= 1000).count();
+        if (cnt < 5) { d.setBuffer(k("bal"), 0); return; } // not enough data / loading
 
-        long interval = now - last;
-        if (interval > 150) {                  // gap (lag/AFK) — reset balance
-            data.setBuffer(k("bal"), 0);
-            return;
-        }
+        double expected = 20.0;
+        double bal = d.buffer(k("bal"));
+        if (cnt > expected + 2) bal = Math.min(60.0, bal + (cnt - expected) * 0.5);
+        else bal = Math.max(0.0, bal - 1.5);
+        d.setBuffer(k("bal"), bal);
 
-        // Expected 50 ms per packet. Negative interval-deficit banks "extra"
-        // ticks. Drift accumulates only when consistently early.
-        double balance = data.buffer(k("bal"));
-        balance += (50.0 - interval);
-        balance = Math.max(-200.0, Math.min(2000.0, balance));
-        data.setBuffer(k("bal"), balance);
-
-        double trigger = cfgD("balance-ms", 320.0);
-        if (balance > trigger) {
-            fail(data, player, String.format("clock drift %.0fms ahead", balance));
-            data.setBuffer(k("bal"), 0);
+        if (bal > cfgD("balance", 9.0)) {
+            fail(d, player, String.format("%d packets/s (vanilla ~20)", cnt));
+            d.setBuffer(k("bal"), 0);
         }
     }
 }
