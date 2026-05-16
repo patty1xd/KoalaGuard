@@ -14,7 +14,12 @@ public final class ViolationScore {
     private double score;
     private int badStreak;
     private int cleanStreak;
-    private long lastConfirmTick = Long.MIN_VALUE;
+    // NOT Long.MIN_VALUE: `tick - lastConfirmTick` would overflow to a huge
+    // negative on the first check and the cooldown gate would never pass, so
+    // no violation could ever confirm. A large negative sentinel keeps the
+    // subtraction safe and lets the first confirmation through immediately.
+    private boolean everConfirmed;
+    private long lastConfirmTick;
 
     /** Raise the score; returns the new value. */
     public double add(double amount) {
@@ -43,8 +48,9 @@ public final class ViolationScore {
      *         rate-limited so one sustained cheat is one flag, not a flood.
      */
     public boolean consume(double threshold, int minStreak, long tick, int cooldownTicks) {
-        if (score >= threshold && badStreak >= minStreak
-                && tick - lastConfirmTick >= cooldownTicks) {
+        boolean cooled = !everConfirmed || (tick - lastConfirmTick) >= cooldownTicks;
+        if (score >= threshold && badStreak >= minStreak && cooled) {
+            everConfirmed = true;
             lastConfirmTick = tick;
             score *= 0.5;        // bleed, don't zero — repeat offenders escalate
             return true;
