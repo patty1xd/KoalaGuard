@@ -2,25 +2,34 @@ package com.koalaguard;
 
 import com.github.retrooper.packetevents.PacketEvents;
 import com.koalaguard.alert.AlertManager;
-import com.koalaguard.check.CheckManager;
 import com.koalaguard.command.KoalaGuardCommand;
 import com.koalaguard.data.DataManager;
 import com.koalaguard.discord.DiscordBot;
-import com.koalaguard.listener.StateListener;
+import com.koalaguard.engine.EngineManager;
+import com.koalaguard.engine.EngineTask;
+import com.koalaguard.engine.lag.TransactionDriver;
+import com.koalaguard.engine.packet.PacketCaptureListener;
+import com.koalaguard.listener.BukkitStateListener;
 import com.koalaguard.logging.KoalaGuardLogs;
 import com.koalaguard.manager.BanManager;
 import com.koalaguard.manager.SafetyManager;
 import com.koalaguard.manager.ViolationManager;
-import com.koalaguard.processor.CombatProcessor;
-import com.koalaguard.processor.MovementTask;
-import com.koalaguard.processor.PacketProcessor;
 import com.koalaguard.processor.SetbackManager;
-import com.koalaguard.processor.TransactionManager;
 import com.koalaguard.util.ServerMetrics;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
+/**
+ * KoalaGuard — server-authoritative anticheat.
+ *
+ * The whole plugin is one pipeline:
+ *   netty {@link PacketCaptureListener}  →  per-tick {@link EngineTask}
+ *   (state machine + simulator)          →  modular checks (violation scoring)
+ *   →  kept alert / Discord / punishment infrastructure.
+ *
+ * There is no event-driven or timing-threshold detection anywhere.
+ */
 public final class KoalaGuard extends JavaPlugin {
 
     private static KoalaGuard instance;
@@ -33,13 +42,11 @@ public final class KoalaGuard extends JavaPlugin {
     private DiscordBot discordBot;
     private AlertManager alertManager;
     private ViolationManager violationManager;
-    private CheckManager checkManager;
-    private TransactionManager transactionManager;
     private SetbackManager setbackManager;
+    private EngineManager engine;
 
     @Override
     public void onLoad() {
-        // PacketEvents must be created in onLoad (before the netty pipeline is built).
         PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
         PacketEvents.getAPI().getSettings()
                 .checkForUpdates(false)
@@ -52,33 +59,29 @@ public final class KoalaGuard extends JavaPlugin {
         instance = this;
         saveDefaultConfig();
 
-        metrics       = new ServerMetrics();
-        dataManager   = new DataManager();
-        safetyManager = new SafetyManager(this);
-        banManager    = new BanManager(this);
-        logs          = new KoalaGuardLogs(this);
-        discordBot    = new DiscordBot(this);
+        metrics          = new ServerMetrics();
+        dataManager      = new DataManager();
+        safetyManager    = new SafetyManager(this);
+        banManager       = new BanManager(this);
+        logs             = new KoalaGuardLogs(this);
+        discordBot       = new DiscordBot(this);
         discordBot.start();
         alertManager     = new AlertManager(this);
         violationManager = new ViolationManager(this);
+        setbackManager   = new SetbackManager(this);
 
-        checkManager = new CheckManager(this);
-        checkManager.registerAll();
+        engine = new EngineManager(this);
+        engine.registerAll();
 
-        transactionManager = new TransactionManager(this);
-        setbackManager = new SetbackManager(this);
-
-        // Packet capture (netty thread) — records ground truth into PlayerData.
-        // Priority is carried by PacketListenerAbstract's constructor, so the
-        // single-arg (PacketListenerCommon) overload is the correct one.
-        PacketEvents.getAPI().getEventManager().registerListener(new PacketProcessor(this));
+        // Unified packet capture (netty thread) — pure ground-truth recording.
+        PacketEvents.getAPI().getEventManager().registerListener(new PacketCaptureListener(this));
         PacketEvents.getAPI().init();
 
-        // Main-thread evaluators consume the packet-accurate model.
-        transactionManager.runTaskTimer(this, 1L, 1L);
-        new MovementTask(this).runTaskTimer(this, 1L, 1L);
-        Bukkit.getPluginManager().registerEvents(new CombatProcessor(this), this);
-        Bukkit.getPluginManager().registerEvents(new StateListener(this), this);
+        // Lag-comp transaction clock, then the per-tick engine driver.
+        new TransactionDriver(this).runTaskTimer(this, 1L, 1L);
+        new EngineTask(this).runTaskTimer(this, 1L, 1L);
+
+        Bukkit.getPluginManager().registerEvents(new BukkitStateListener(this), this);
 
         KoalaGuardCommand cmd = new KoalaGuardCommand(this);
         getCommand("koalaguard").setExecutor(cmd);
@@ -87,7 +90,7 @@ public final class KoalaGuard extends JavaPlugin {
         Bukkit.getOnlinePlayers().forEach(p -> dataManager.create(p));
 
         getLogger().info("KoalaGuard v" + getPluginMeta().getVersion()
-                + " enabled (packet-driven) — protecting "
+                + " enabled (server-authoritative engine) — protecting "
                 + Bukkit.getOnlinePlayers().size() + " player(s).");
     }
 
@@ -100,16 +103,15 @@ public final class KoalaGuard extends JavaPlugin {
         getLogger().info("KoalaGuard disabled.");
     }
 
-    public static KoalaGuard getInstance()      { return instance; }
-    public ServerMetrics getMetrics()           { return metrics; }
-    public DataManager getDataManager()         { return dataManager; }
-    public SafetyManager getSafetyManager()     { return safetyManager; }
-    public BanManager getBanManager()           { return banManager; }
-    public KoalaGuardLogs getLogs()             { return logs; }
-    public DiscordBot getDiscordBot()           { return discordBot; }
-    public AlertManager getAlertManager()       { return alertManager; }
+    public static KoalaGuard getInstance()        { return instance; }
+    public ServerMetrics getMetrics()             { return metrics; }
+    public DataManager getDataManager()           { return dataManager; }
+    public SafetyManager getSafetyManager()       { return safetyManager; }
+    public BanManager getBanManager()             { return banManager; }
+    public KoalaGuardLogs getLogs()               { return logs; }
+    public DiscordBot getDiscordBot()             { return discordBot; }
+    public AlertManager getAlertManager()         { return alertManager; }
     public ViolationManager getViolationManager() { return violationManager; }
-    public CheckManager getCheckManager()       { return checkManager; }
-    public TransactionManager getTransactionManager() { return transactionManager; }
-    public SetbackManager getSetbackManager()   { return setbackManager; }
+    public SetbackManager getSetbackManager()     { return setbackManager; }
+    public EngineManager getEngine()              { return engine; }
 }
