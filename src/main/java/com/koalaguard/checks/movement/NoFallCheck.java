@@ -3,16 +3,15 @@ package com.koalaguard.checks.movement;
 import com.koalaguard.KoalaGuard;
 import com.koalaguard.check.MovementCheck;
 import com.koalaguard.data.PlayerData;
+import com.koalaguard.util.MovementPredictor;
 import org.bukkit.entity.Player;
 
 /**
- * NoFall detection.
- *
- * NoFall spoofs an onGround=true packet mid-air so the server zeroes the
- * accumulated fall distance and applies no damage. We track the real fall
- * (server-side Y descent) and flag when the client claims ground / fall
- * distance resets while the player is demonstrably still in the air with no
- * solid block beneath them.
+ * NoFall — targets the real cheat (LiquidBounce/FDP NoFall: spoof
+ * onGround=true mid-air, or AirJump). The client's OWN flying-packet
+ * onGround flag (d.clientGround) claims ground while the server knows there
+ * is no block under them and they are still descending with accumulated
+ * fall. Flag + lagback so the negated fall damage is restored.
  */
 public final class NoFallCheck extends MovementCheck {
 
@@ -21,41 +20,26 @@ public final class NoFallCheck extends MovementCheck {
     }
 
     @Override
-    public void handle(PlayerData data, Player player) {
-        if (data.exemptFlying || data.exemptVehicle || data.exemptGliding || data.exemptLiquid
-                || data.exemptRiptide || data.exemptSlowFalling || data.exemptClimbing
-                || data.exemptLevitation) { data.setBuffer(k("fall"), 0); return; }
+    public void handle(PlayerData d, Player player) {
+        if (MovementPredictor.verticalUnsafe(d, player)) { d.setBuffer(k("fall"), 0); return; }
 
-        long now = System.currentTimeMillis();
-        if (now - data.lastVelocityMs < 1200 || now - data.slimeBounceMs < 1500
-                || now - data.bubbleColumnMs < 1200 || now - data.lastTeleportMs < 1500) {
-            data.setBuffer(k("fall"), 0);
-            return;
+        if (d.deltaY < -0.08 && !d.serverGround && !d.nearGround) {
+            d.addBuffer(k("fall"), -d.deltaY, 80.0);          // accumulate true fall
         }
+        double fallen = d.buffer(k("fall"));
 
-        double fallen = data.buffer(k("fall"));
+        boolean clientClaimsGround = d.clientGround;
+        boolean serverSaysAir = !d.serverGround && !d.nearGround;
 
-        if (data.deltaY < -0.08 && !data.onGround && !data.serverGround) {
-            // genuinely descending in open air — accumulate
-            data.addBuffer(k("fall"), -data.deltaY, 64.0);
-            return;
-        }
-
-        boolean reallyGrounded = data.serverGround;
-        if ((data.clientGround || player.getFallDistance() < 0.4) && !reallyGrounded
-                && data.deltaY < -0.08 && fallen >= 3.2) {
-            double buf = data.addBuffer(k("b"), 3.0, 9.0);
+        if (clientClaimsGround && serverSaysAir && d.deltaY < -0.08 && fallen >= 3.5) {
+            double buf = d.addBuffer(k("b"), 3.0, 9.0);
             if (buf >= 5.0) {
-                fail(data, player, String.format("fall=%.1f blocks, claimed ground in air", fallen));
-                data.setBuffer(k("b"), 1.0);
+                failAndSetback(d, player, String.format("claimed ground after %.1f-block fall", fallen));
+                d.setBuffer(k("b"), 1.0);
             }
-            data.setBuffer(k("fall"), 0);
+            d.setBuffer(k("fall"), 0);
             return;
         }
-
-        if (reallyGrounded) {
-            data.setBuffer(k("fall"), 0);
-            data.subBuffer(k("b"), 1.0);
-        }
+        if (d.serverGround || d.nearGround) { d.setBuffer(k("fall"), 0); d.subBuffer(k("b"), 1.0); }
     }
 }
