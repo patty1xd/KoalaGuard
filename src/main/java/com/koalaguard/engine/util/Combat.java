@@ -60,4 +60,19 @@ public final class Combat {
     public static double[] eyeOf(PositionFrame f, double eyeHeight) {
         return new double[]{ f.x, f.y + eyeHeight, f.z };
     }
+
+    /**
+     * {ex, ey, ez, yaw, pitch} for the attack tick. Uses the reconstructed
+     * frame when one exists (the spoofable client position); when the attacker
+     * never produced a movement frame (e.g. testing while standing perfectly
+     * still) it falls back to the authoritative server eye/look, which for a
+     * stationary player IS the true position — so combat checks still run.
+     */
+    public static double[] eyeLook(PositionFrame f, Player p) {
+        if (f != null) {
+            return new double[]{ f.x, f.y + eyeHeight(p), f.z, f.yaw, f.pitch };
+        }
+        org.bukkit.Location l = p.getEyeLocation();
+        return new double[]{ l.getX(), l.getY(), l.getZ(), l.getYaw(), l.getPitch() };
+    }
 }
