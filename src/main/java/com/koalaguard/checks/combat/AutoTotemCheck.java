@@ -170,16 +170,16 @@ public final class AutoTotemCheck extends ListenerCheck {
 
     private void analyzeConsistency(Player player, PlayerData d) {
 
-        if (d.totemSamples == null) {
-            d.totemSamples = new ArrayDeque<>();
+        if (d.totemReequipSamples == null) {
+            d.totemReequipSamples = new ArrayDeque<>();
         }
 
-        if (d.totemSamples.size() < 6) {
+        if (d.totemReequipSamples.size() < 6) {
             return;
         }
 
-        double mean = mean(d.totemSamples);
-        double deviation = deviation(d.totemSamples, mean);
+        double mean = mean(d.totemReequipSamples);
+        double deviation = deviation(d.totemReequipSamples, mean);
 
         // modern cheats randomize slightly
         // so look for unnaturally stable low reactions
@@ -196,21 +196,21 @@ public final class AutoTotemCheck extends ListenerCheck {
                         ));
 
                 d.setInt(k("consistency"), 0);
-                d.totemSamples.clear();
+                d.totemReequipSamples.clear();
             }
         }
     }
 
     private void recordSample(PlayerData d, long value) {
 
-        if (d.totemSamples == null) {
-            d.totemSamples = new ArrayDeque<>();
+        if (d.totemReequipSamples == null) {
+            d.totemReequipSamples = new ArrayDeque<>();
         }
 
-        d.totemSamples.addLast(value);
+        d.totemReequipSamples.addLast(value);
 
-        while (d.totemSamples.size() > 12) {
-            d.totemSamples.removeFirst();
+        while (d.totemReequipSamples.size() > 12) {
+            d.totemReequipSamples.removeFirst();
         }
     }
 
