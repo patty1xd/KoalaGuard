@@ -47,10 +47,10 @@ public final class HitValidationCheck extends SimCheck {
         if (victim == null) return;
 
         PositionFrame f = ctx.state.frameAtOrBefore(atk);
-        if (f == null) return;
-        double[] eye = Combat.eyeOf(f, Combat.eyeHeight(ctx.player));
+        double[] eye = Combat.eyeLook(f, ctx.player);
 
-        double angle = Combat.aimAngle(eye[0], eye[1], eye[2], f.yaw, f.pitch, victim);
+        double angle = Combat.aimAngle(eye[0], eye[1], eye[2],
+                (float) eye[3], (float) eye[4], victim);
         double dist = Math.max(0.5, Combat.distanceToBox(eye[0], eye[1], eye[2], victim));
         BoundingBox b = victim.getBoundingBox();
         double radius = Math.max(b.getWidthX(), b.getHeight()) / 2.0 + 0.10;

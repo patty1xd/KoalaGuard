@@ -42,9 +42,7 @@ public final class ReachCheck extends SimCheck {
         if (victim == null) return;
 
         PositionFrame f = ctx.state.frameAtOrBefore(atk);
-        if (f == null) return;
-
-        double[] eye = Combat.eyeOf(f, Combat.eyeHeight(ctx.player));
+        double[] eye = Combat.eyeLook(f, ctx.player);
         double dist = Combat.distanceToBox(eye[0], eye[1], eye[2], victim);
 
         double base = cfgD("max-reach", 3.0);
