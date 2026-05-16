@@ -2,23 +2,24 @@ name: KoalaGuard
 version: '${project.version}'
 main: com.koalaguard.KoalaGuard
 api-version: '1.21'
-description: Advanced anticheat plugin for Paper 1.21
-authors: [ ]
+description: High-performance behavioural anticheat for Paper 1.21.11
+authors: [ KoalaGuard ]
+website: https://github.com/
 
 permissions:
   koalaguard.alerts:
-    description: Receive anticheat violation alerts in-game
+    description: Receive in-game violation alerts
     default: op
   koalaguard.bypass:
-    description: Bypass all anticheat checks
+    description: Exempt from every check
     default: false
   koalaguard.admin:
-    description: Access all KoalaGuard admin commands
+    description: Access KoalaGuard admin commands
     default: op
 
 commands:
   koalaguard:
     description: KoalaGuard admin command
-    aliases: [kg]
+    aliases: [ kg, koala ]
     permission: koalaguard.admin
-    usage: /koalaguard <reload|bans|unban|violations|discord>
+    usage: /koalaguard <reload|checks|info|tp|bans|unban|discord>

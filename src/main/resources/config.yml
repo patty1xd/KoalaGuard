@@ -1,314 +1,120 @@
+# ════════════════════════════════════════════════════════════════
+#  KoalaGuard — Paper 1.21.11 anticheat
+#  Alerts are rich (hover + colour in-game, embeds in Discord).
+#  Defaults are tuned for ZERO false positives on a laggy network.
+# ════════════════════════════════════════════════════════════════
+
+# Verbose per-flag debug to console.
+debug: false
+
 messages:
-  prefix: "§c[KoalaGuard] §b"
+  prefix: "&b[KoalaGuard] "
 
 alerts:
+  # Players with this permission see in-game alerts.
   permission: "koalaguard.alerts"
   console: true
 
 punishments:
+  # Broadcast punishments to everyone (false = staff only).
   broadcast: false
-  broadcast-permission: "koalaguard.alerts"
 
-# ─────────────────────────────────────────────
-# Safety gates — reduce false positives
-# ─────────────────────────────────────────────
+# ── Anti-false-positive gate ─────────────────────────────────────
+# A flag is DROPPED entirely while any of these are true.
 safety:
-  # Bans are OFF by default. Set to true only when you trust your threshold tuning.
+  # Bans are OFF until you trust your tuning. Ban punishments fall back to kick.
   allow-bans: false
-  # Checks will not flag if player ping exceeds this (ms).
-  max-ping-ms: 300
-  # Checks will not flag if server TPS drops below this.
+  max-ping-ms: 320
   min-tps: 17.5
-  # Minimum time between successive flags for the same check (prevents burst VL).
-  flag-cooldown-ms: 750
-  # Grace windows (ms) — checks are suppressed after these events.
+  flag-cooldown-ms: 600
   teleport-grace-ms: 1500
-  velocity-grace-ms: 800
+  velocity-grace-ms: 900
   damage-grace-ms: 600
-  join-grace-ms: 3000
-  respawn-grace-ms: 2000
-  # Downgrade punishment when server is unstable: warn | kick
+  join-grace-ms: 3500
+  respawn-grace-ms: 2500
+  # When server is unstable, downgrade any punishment to this.
   unstable-downgrade: "warn"
 
-# ─────────────────────────────────────────────
-# Discord Bot
-# ─────────────────────────────────────────────
-# HOW TO SET UP:
-#   1. Go to https://discord.com/developers/applications
-#   2. Create a new application → Bot → copy the TOKEN
-#   3. Enable "Message Content Intent" in Bot settings
-#   4. Invite the bot: OAuth2 → URL Generator → bot scope → "Send Messages"
-#   5. Right-click the target channel → Copy Channel ID (enable Developer Mode first)
-#   6. Paste values below, then /kg reload
+# ── Violation level decay ────────────────────────────────────────
+# Every <decay-interval>s each check's VL drops by <violation-decay>.
+violation-decay: 1.0
+decay-interval: 30
+# Per clean action a check bleeds this much VL.
+reward-decay: 0.05
+
+# ── Discord (rich embeds) ────────────────────────────────────────
+# 1. https://discord.com/developers/applications → New Application → Bot
+# 2. Copy the bot TOKEN, invite with "Send Messages" + "Embed Links"
+# 3. Enable Developer Mode, right-click your channel → Copy Channel ID
 discord:
   bot-token: ""
   alert-channel-id: ""
 
-# ─────────────────────────────────────────────
-# Violation decay
-# ─────────────────────────────────────────────
-violation-decay: 1
-decay-interval: 60
-
-# ─────────────────────────────────────────────
-# Checks
-# punishment: warn | kick | ban
-# ban-duration: e.g. 7d, 24h, 30m, permanent
-# ─────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+#  Checks
+#  punishment: warn | kick | ban     ban-duration: 7d | 24h | permanent
+#  max-violations: VL at which the punishment fires
+# ════════════════════════════════════════════════════════════════
 checks:
 
-  # ── MOVEMENT ──────────────────────────────
-  speed:
-    enabled: true
-    max-violations: 15
-    punishment: kick
-    ban-duration: 7d
+  # ── MOVEMENT ──
+  speed:        { enabled: true, max-violations: 20, punishment: kick, ban-duration: 7d }
+  strafe:       { enabled: true, max-violations: 18, punishment: kick, ban-duration: 7d }
+  motion:       { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
+  fly:          { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d }
+  nofall:       { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  step:         { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
+  jesus:        { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  noslow:       { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
+  sprint:       { enabled: true, max-violations: 18, punishment: kick, ban-duration: 7d }
+  phase:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
+  timer:        { enabled: true, max-violations: 14, punishment: kick, ban-duration: 7d, balance-ms: 320 }
+  fastclimb:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  antihunger:   { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
+  web:          { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  elytrafly:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d }
+  blink:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
+  scaffold:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d, max-place-rate: 8 }
+  burrow:       { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d }
 
-  fly:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 30d
+  # ── COMBAT ──
+  reach:        { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d, max-reach: 3.0 }
+  killaura:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: permanent }
+  autoclicker:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d, max-cps: 22 }
+  attackspeed:  { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  hitbox:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
+  aimassist:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
+  noswing:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  invalidattack:{ enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d }
+  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  tbot:         { enabled: true, max-violations: 8,  punishment: kick, ban-duration: permanent, min-streak: 6 }
+  velocity:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  surround:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
+  selftrap:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
+  crystalaura:  { enabled: true, max-violations: 7,  punishment: kick, ban-duration: permanent, max-hits-per-sec: 6 }
+  bowaimbot:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
+  autototem:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, min-swap-ticks: 3 }
+  autoarmor:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  autoweapon:   { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  offhand:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-swaps-per-sec: 10 }
 
-  jesus:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
+  # ── PLAYER ──
+  airplace:     { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 7d }
+  chestswap:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, min-swap-ticks: 3 }
+  autoeat:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  autoreplenish:{ enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  fastuse:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  regen:        { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  autofish:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
+  expthrower:   { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  inventoryhack:{ enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-clicks-per-sec: 18 }
+  inventorymove:{ enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  autotool:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  fastplace:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-per-sec: 12 }
+  blockreach:   { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-reach: 5.2 }
+  speedmine:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
 
-  velocity:
-    enabled: true
-    max-violations: 12
-    punishment: kick
-    ban-duration: 7d
-
-  phase:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-
-  burrow:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-
-  # Timer hack — sending extra movement packets
-  timer:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  # NoFall — prevents fall damage via fake onGround packet
-  nofall:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 7d
-
-  # NoSlow — moves at full speed while eating, charging bow, or blocking
-  noslow:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  # Step — steps up full 1-block heights without jumping
-  step:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  # Auto-scaffold bridging
-  scaffold:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-    max-place-rate: 10       # max blocks placed per second
-    max-air-placements: 3    # max consecutive block places while in air
-
-  # ── COMBAT ────────────────────────────────
-  killaura:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: permanent
-
-  autoclicker:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 7d
-    max-cps: 20
-
-  reach:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 30d
-    max-reach: 3.2
-
-  criticals:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  aimassist:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 30d
-
-  autototem:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-    min-swap-ticks: 2
-
-  autoarmor:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  autoweapon:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  offhand:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  bowaimbot:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 30d
-
-  surround:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-
-  selftrap:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-
-  # TBot (TriggerBot) — auto-attacks the instant an enemy enters hit range
-  tbot:
-    enabled: true
-    max-violations: 6
-    punishment: kick
-    ban-duration: permanent
-    min-streak: 3   # how many consecutive entry-hits before flagging
-
-  # Hitbox expander — enlarged enemy hitboxes for easier/longer hits
-  hitbox:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 30d
-
-  # NoWeb / Web bypass — moving or attacking at full speed inside cobwebs
-  webaura:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 7d
-    max-attacks-in-web: 5  # max hits allowed in a 2-second cobweb window
-
-  # CrystalAura — auto place+detonate end crystals every tick
-  crystalaura:
-    enabled: true
-    max-violations: 5
-    punishment: kick
-    ban-duration: permanent
-
-  # ── PLAYER ────────────────────────────────
-  autoeat:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  autoreplenish:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  antihunger:
-    enabled: true
-    max-violations: 12
-    punishment: kick
-    ban-duration: 7d
-
-  regen:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  autofish:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 7d
-
-  expthrower:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  chestswap:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 30d
-    min-swap-ticks: 3
-
-  speedmine:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
-
-  # Meteor AirPlace — placing blocks against air (no block face clicked)
-  airplace:
-    enabled: true
-    max-violations: 6
-    punishment: kick
-    ban-duration: 7d
-
-  # ── WORLD ─────────────────────────────────
-  nuker:
-    enabled: true
-    max-violations: 5
-    punishment: kick
-    ban-duration: permanent
-
-  fastbreak:
-    enabled: true
-    max-violations: 8
-    punishment: kick
-    ban-duration: 7d
-
-  autosmelter:
-    enabled: true
-    max-violations: 10
-    punishment: kick
-    ban-duration: 7d
+  # ── WORLD ──
+  nuker:        { enabled: true, max-violations: 7,  punishment: kick, ban-duration: permanent, max-distance: 6.0, max-breaks-per-sec: 8 }
+  fastbreak:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
+  autosmelter:  { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-extracts-per-sec: 5 }
