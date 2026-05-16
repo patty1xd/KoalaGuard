@@ -1,86 +1,63 @@
 package com.koalaguard.checks.player;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
+import com.koalaguard.util.MathUtil;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerFishEvent;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 /**
- * Detects Meteor AutoFish.
- *
- * From Meteor's source (AutoFish.java):
- *   - Listens for the BITE state on the fishing hook.
- *   - Default delay: 0 ticks — immediately reels in on the same tick as the bite.
- *   - Server-side: PlayerFishEvent CAUGHT_FISH fires within < 50 ms of BITE.
- *   - Human minimum reaction time: ~150 ms (measured empirically).
- *
- * Detection:
- *   A) Single sub-100 ms reaction: streak of 2 before flagging.
- *   B) Consistent reaction times: variance < 30 ms² over 5 catches
- *      combined with mean < 80 ms (consistently machine-fast reactions).
+ * AutoFish detection — reeling within sub-human reaction time of the bite,
+ * or with machine-consistent reaction times across many catches.
  */
-public class AutoFishCheck extends Check {
+public final class AutoFishCheck extends ListenerCheck {
 
-    private final Map<UUID, Long>        lastBiteMs       = new HashMap<>();
-    private final Map<UUID, Integer>     fastStreak       = new HashMap<>();
-    private final Map<UUID, List<Long>>  reactionTimes    = new HashMap<>();
-
-    private static final long FAST_REACTION_MS = 100L;
-
-    public AutoFishCheck(KoalaGuard plugin) { super(plugin, "autofish"); }
+    public AutoFishCheck(KoalaGuard plugin) {
+        super(plugin, "autofish", CheckCategory.PLAYER, "Auto-fishing (instant bite reaction)");
+    }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onFish(PlayerFishEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
 
-        UUID uuid = player.getUniqueId();
-        long now  = System.currentTimeMillis();
-
+        long now = System.currentTimeMillis();
         if (event.getState() == PlayerFishEvent.State.BITE) {
-            lastBiteMs.put(uuid, now);
-
+            data.setLong(k("bite"), now);
         } else if (event.getState() == PlayerFishEvent.State.CAUGHT_FISH) {
-            Long biteMs = lastBiteMs.remove(uuid);
-            if (biteMs == null) return;
+            long bite = data.getLong(k("bite"));
+            data.setLong(k("bite"), 0);
+            if (bite == 0) return;
+            long reaction = now - bite;
 
-            long reaction = now - biteMs;
-
-            // Sub-check A: single fast reaction streak
-            if (reaction < FAST_REACTION_MS) {
-                int s = fastStreak.merge(uuid, 1, Integer::sum);
+            if (reaction < 100) {
+                int s = data.incInt(k("s"));
                 if (s >= 2) {
-                    flag(player, "autofish reaction=" + reaction + "ms streak=" + s);
-                    fastStreak.put(uuid, 0);
-                    reactionTimes.remove(uuid);
-                    return;
+                    fail(data, player, "reaction=" + reaction + "ms streak=" + s);
+                    data.setInt(k("s"), 0);
                 }
             } else {
-                fastStreak.put(uuid, 0);
+                data.setInt(k("s"), 0);
             }
 
-            // Sub-check B: consistent reaction variance over 5 catches
-            List<Long> times = reactionTimes.computeIfAbsent(uuid, k -> new ArrayList<>());
-            times.add(reaction);
-            if (times.size() > 10) times.remove(0);
-
-            if (times.size() >= 5) {
-                double mean = times.stream().mapToLong(Long::longValue).average().orElse(0);
-                double var  = times.stream().mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0);
-                if (var < 30 && mean < 80) {
-                    flag(player, String.format("consistent_fish mean=%.0fms var=%.1f", mean, var));
-                    times.clear();
-                }
+            List<Long> rt = data.obj(k("rt"));
+            if (rt == null) { rt = new ArrayList<>(); data.setObj(k("rt"), rt); }
+            rt.add(reaction);
+            if (rt.size() > 10) rt.remove(0);
+            if (rt.size() >= 5 && MathUtil.variance(rt) < 30 && MathUtil.average(rt) < 90) {
+                fail(data, player, String.format("consistent reaction mean=%.0fms var=%.1f",
+                        MathUtil.average(rt), MathUtil.variance(rt)));
+                rt.clear();
             }
         }
     }

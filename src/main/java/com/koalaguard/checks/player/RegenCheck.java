@@ -1,7 +1,9 @@
 package com.koalaguard.checks.player;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -9,83 +11,50 @@ import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-
 /**
- * Detects abnormally fast health regeneration.
- *
- * Vanilla regen intervals (from Minecraft source):
- *   Natural regen (food ≥ 18):         80 ticks  = 4000 ms
- *   Regeneration I  (amplifier = 0):   50 ticks  = 2500 ms
- *   Regeneration II (amplifier = 1):   25 ticks  = 1250 ms
- *   Regeneration III+(amplifier ≥ 2):  12 ticks  = 600  ms  (enchanted golden apple)
- *
- * We add a 20% leniency buffer to all thresholds to absorb TPS variance and
- * packet timing jitter before flagging.
- *
- * False-positive fixes vs previous version:
- *   - Now checks Regen amplifier to use the correct minimum interval.
- *   - Skips players with Absorption (golden apple eaten — does NOT give fast regen itself).
- *   - Skips Instant Health potion regains (those are a different event reason).
- *   - Uses a 3-event streak before flagging, not a single event.
+ * Fast-regen detection — natural/SATIATED health regain ticks arriving
+ * faster than the vanilla interval for the player's current Regeneration
+ * level. Instant Health and food/magic regains are excluded.
  */
-public class RegenCheck extends Check {
+public final class RegenCheck extends ListenerCheck {
 
-    private final Map<UUID, Long>    lastRegenMs = new HashMap<>();
-    private final Map<UUID, Integer> fastStreak  = new HashMap<>();
-
-    public RegenCheck(KoalaGuard plugin) { super(plugin, "regen"); }
+    public RegenCheck(KoalaGuard plugin) {
+        super(plugin, "regen", CheckCategory.PLAYER, "Healing faster than vanilla");
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onRegen(EntityRegainHealthEvent event) {
         if (!isEnabled()) return;
         if (!(event.getEntity() instanceof Player player)) return;
         if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
+        EntityRegainHealthEvent.RegainReason r = event.getRegainReason();
+        if (r != EntityRegainHealthEvent.RegainReason.SATIATED
+                && r != EntityRegainHealthEvent.RegainReason.REGEN) return;
 
-        // Instant Health / Saturation / Ender pearl recovery — not a timed regen
-        EntityRegainHealthEvent.RegainReason reason = event.getRegainReason();
-        if (reason == EntityRegainHealthEvent.RegainReason.MAGIC
-                || reason == EntityRegainHealthEvent.RegainReason.MAGIC_REGEN
-                || reason == EntityRegainHealthEvent.RegainReason.EATING) return;
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
 
-        UUID uuid   = player.getUniqueId();
-        long now    = System.currentTimeMillis();
-        Long lastMs = lastRegenMs.get(uuid);
-        lastRegenMs.put(uuid, now);
+        long now = System.currentTimeMillis();
+        long last = data.getLong(k("last"));
+        data.setLong(k("last"), now);
+        if (last == 0) return;
 
-        if (lastMs == null) return;
-        long elapsed = now - lastMs;
+        long min = 4000;
+        PotionEffect reg = player.getPotionEffect(PotionEffectType.REGENERATION);
+        if (reg != null) {
+            int amp = reg.getAmplifier();
+            min = amp >= 2 ? 500 : amp == 1 ? 1150 : 2300;
+        }
+        long threshold = (long) (min * 0.75);
 
-        // Determine minimum legitimate interval based on active Regen effect
-        long minMs = computeMinRegenMs(player);
-
-        // Apply 20% leniency buffer for TPS fluctuation
-        long threshold = (long)(minMs * 0.80);
-
-        if (elapsed < threshold) {
-            int s = fastStreak.merge(uuid, 1, Integer::sum);
+        if (now - last < threshold) {
+            int s = data.incInt(k("s"));
             if (s >= 3) {
-                flag(player, String.format("fast_regen elapsed=%dms min=%dms streak=%d",
-                        elapsed, minMs, s));
-                fastStreak.put(uuid, 0);
+                fail(data, player, "regen gap=" + (now - last) + "ms min=" + min + "ms streak=" + s);
+                data.setInt(k("s"), 0);
             }
         } else {
-            fastStreak.put(uuid, 0);
+            data.setInt(k("s"), 0);
         }
-    }
-
-    private static long computeMinRegenMs(Player player) {
-        PotionEffect regen = player.getPotionEffect(PotionEffectType.REGENERATION);
-        if (regen != null) {
-            int amp = regen.getAmplifier(); // 0 = Regen I, 1 = Regen II, etc.
-            if (amp >= 2) return 600;   // Regen III+ (enchanted golden apple)
-            if (amp == 1) return 1250;  // Regen II
-            return 2500;                // Regen I
-        }
-        // Natural food regen: 80 ticks
-        return 4000;
     }
 }

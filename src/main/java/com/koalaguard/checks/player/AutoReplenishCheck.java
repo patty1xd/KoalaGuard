@@ -1,86 +1,56 @@
 package com.koalaguard.checks.player;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.inventory.ItemStack;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-
 /**
- * Detects Meteor InvManager / AutoReplenish.
- *
- * From Meteor's source (InvManager.java):
- *   - Monitors hotbar item counts; when a stack runs low (or reaches 1),
- *     automatically moves a matching stack from inventory to the hotbar slot.
- *   - This happens within 0–1 ticks of the slot being selected.
- *   - Observable: item count in the active hotbar slot jumps UP on the SAME
- *     slot visit without any inventory interaction from the player.
- *
- * Detection:
- *   Track item count when a slot is first visited (PlayerItemHeldEvent).
- *   On the NEXT visit to the same slot: if count increased without any
- *   inventory open event in between AND the increase happened within 100 ms,
- *   that's an automated replenish.
- *   Require 3 consecutive such replenish detections before flagging.
+ * AutoReplenish detection — the active hotbar slot's stack count jumps
+ * upward within ~150 ms of leaving and returning to it, with no inventory
+ * interaction. Streak required.
  */
-public class AutoReplenishCheck extends Check {
+public final class AutoReplenishCheck extends ListenerCheck {
 
-    private final Map<UUID, Integer> prevCount     = new HashMap<>();
-    private final Map<UUID, Long>    prevVisitMs   = new HashMap<>();
-    private final Map<UUID, Integer> prevSlot      = new HashMap<>();
-    private final Map<UUID, Integer> replenStreak  = new HashMap<>();
-
-    private static final long REPLENISH_WINDOW_MS = 150L;
-
-    public AutoReplenishCheck(KoalaGuard plugin) { super(plugin, "autoreplenish"); }
+    public AutoReplenishCheck(KoalaGuard plugin) {
+        super(plugin, "autoreplenish", CheckCategory.PLAYER, "Auto-refilling hotbar stacks");
+    }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onHeldChange(PlayerItemHeldEvent event) {
+    public void onHeld(PlayerItemHeldEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
 
-        UUID uuid    = player.getUniqueId();
-        long now     = System.currentTimeMillis();
-        int  newSlot = event.getNewSlot();
-        int  oldSlot = event.getPreviousSlot();
+        long now = System.currentTimeMillis();
+        int newSlot = event.getNewSlot();
+        int lastSlot = (int) data.getLong(k("slot")) - 1;
+        int lastCount = data.getInt(k("cnt"));
+        long lastMs = data.getLong(k("ms"));
 
-        // Record count of the slot we're LEAVING
-        ItemStack leaving = player.getInventory().getItem(oldSlot);
-        int leavingCount  = leaving != null ? leaving.getAmount() : 0;
-
-        // Check if count of the slot we're RETURNING TO jumped
-        Integer lastCount = prevCount.get(uuid);
-        Integer lastSlot  = prevSlot.get(uuid);
-        Long    lastMs    = prevVisitMs.get(uuid);
-
-        if (lastSlot != null && lastSlot == newSlot && lastCount != null && lastMs != null) {
-            ItemStack returning = player.getInventory().getItem(newSlot);
-            int returnCount = returning != null ? returning.getAmount() : 0;
-
-            // Count jumped significantly in < REPLENISH_WINDOW_MS — automated refill
-            if (returnCount > lastCount + 8 && now - lastMs < REPLENISH_WINDOW_MS) {
-                int s = replenStreak.merge(uuid, 1, Integer::sum);
+        if (lastSlot == newSlot && lastMs != 0 && now - lastMs < 150) {
+            ItemStack back = player.getInventory().getItem(newSlot);
+            int c = back != null ? back.getAmount() : 0;
+            if (c > lastCount + 8) {
+                int s = data.incInt(k("s"));
                 if (s >= 3) {
-                    flag(player, "replenish slot=" + newSlot
-                            + " " + lastCount + "->" + returnCount
+                    fail(data, player, "replenish slot=" + newSlot + " " + lastCount + "→" + c
                             + " in " + (now - lastMs) + "ms streak=" + s);
-                    replenStreak.put(uuid, 0);
+                    data.setInt(k("s"), 0);
                 }
-            } else if (returnCount <= lastCount) {
-                replenStreak.put(uuid, 0);
             }
         }
 
-        prevSlot.put(uuid, oldSlot);
-        prevCount.put(uuid, leavingCount);
-        prevVisitMs.put(uuid, now);
+        ItemStack leaving = player.getInventory().getItem(event.getPreviousSlot());
+        data.setLong(k("slot"), event.getPreviousSlot() + 1L);
+        data.setInt(k("cnt"), leaving != null ? leaving.getAmount() : 0);
+        data.setLong(k("ms"), now);
     }
 }

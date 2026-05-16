@@ -1,8 +1,9 @@
 package com.koalaguard.checks.player;
 
 import com.koalaguard.KoalaGuard;
-import com.koalaguard.checks.Check;
-import org.bukkit.Material;
+import com.koalaguard.check.CheckCategory;
+import com.koalaguard.check.ListenerCheck;
+import com.koalaguard.data.PlayerData;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -10,80 +11,44 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.ItemStack;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-
 /**
- * Detects Meteor ChestSwap.
- *
- * From Meteor's source (ChestSwap.java):
- *   - Opens inventory, uses InvUtils.move() to place a chestplate from inventory
- *     into the armor chestplate slot (slot 38 in the player inventory), then
- *     closes inventory — all within 0–1 ticks (< 100 ms).
- *   - The observable event: InventoryClickEvent on armor slot 38 (chest slot)
- *     fires, changing the item to a chestplate.
- *   - Human minimum: ~200 ms to open inventory, find item, click, close.
- *
- * Detection:
- *   Time between consecutive chestplate armor-slot clicks < minMs.
- *   Also flag if chestplate is equipped while combat is active (within 3s of last hit)
- *   AND the swap was within 2 ticks (100 ms) — common ChestSwap usage pattern.
+ * ChestSwap detection — instant chestplate/elytra hot-swapping in the armour
+ * slot, far faster than opening the inventory and clicking manually.
  */
-public class ChestSwapCheck extends Check {
+public final class ChestSwapCheck extends ListenerCheck {
 
-    private final Map<UUID, Long>    lastSwapMs    = new HashMap<>();
-    private final Map<UUID, Long>    lastHitMs     = new HashMap<>();
-    private final Map<UUID, Integer> swapStreak    = new HashMap<>();
+    private static final int CHEST_SLOT = 38;
 
-    private static final int  ARMOR_CHEST_SLOT = 38;
-
-    public ChestSwapCheck(KoalaGuard plugin) { super(plugin, "chestswap"); }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!isEnabled()) return;
-        if (!(event.getWhoClicked() instanceof Player player)) return;
-        if (isExempt(player)) return;
-        if (plugin.shouldSuppressFlags(player)) return;
-        if (event.getSlotType() != InventoryType.SlotType.ARMOR) return;
-        if (event.getSlot() != ARMOR_CHEST_SLOT) return;
-
-        // Only flag when a chestplate is being placed INTO the slot
-        ItemStack cursor = event.getCursor();
-        if (cursor == null || cursor.getType() == Material.AIR) return;
-        String name = cursor.getType().name();
-        if (!name.contains("CHESTPLATE") && !name.contains("TUNIC")) return;
-
-        UUID uuid = player.getUniqueId();
-        long now  = System.currentTimeMillis();
-
-        int minTicks = plugin.getConfig().getInt("checks.chestswap.min-swap-ticks", 3);
-        long minMs   = minTicks * 50L;
-
-        Long lastMs = lastSwapMs.get(uuid);
-        if (lastMs != null && now - lastMs < minMs) {
-            int s = swapStreak.merge(uuid, 1, Integer::sum);
-            if (s >= 2) {
-                flag(player, "chestswap elapsed=" + (now - lastMs) + "ms min=" + minMs + "ms streak=" + s);
-                swapStreak.put(uuid, 0);
-            }
-        } else {
-            // Also flag single fast swap during active combat
-            Long hitMs = lastHitMs.get(uuid);
-            if (hitMs != null && now - hitMs < 3000 && lastMs != null && now - lastMs < 100) {
-                flag(player, "combat_chestswap elapsed=" + (now - lastMs) + "ms");
-            }
-            swapStreak.put(uuid, 0);
-        }
-
-        lastSwapMs.put(uuid, now);
+    public ChestSwapCheck(KoalaGuard plugin) {
+        super(plugin, "chestswap", CheckCategory.PLAYER, "Instant chestplate/elytra swapping");
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onDamage(org.bukkit.event.entity.EntityDamageByEntityEvent event) {
-        if (!(event.getDamager() instanceof Player player)) return;
-        if (!(event.getEntity() instanceof Player)) return;
-        lastHitMs.put(player.getUniqueId(), System.currentTimeMillis());
+    public void onClick(InventoryClickEvent event) {
+        if (!isEnabled()) return;
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (isExempt(player)) return;
+        if (event.getSlotType() != InventoryType.SlotType.ARMOR || event.getSlot() != CHEST_SLOT) return;
+        ItemStack cursor = event.getCursor();
+        if (cursor == null || cursor.getType().isAir()) return;
+        String n = cursor.getType().name();
+        if (!n.contains("CHESTPLATE") && !n.equals("ELYTRA")) return;
+
+        PlayerData data = plugin.getDataManager().get(player);
+        if (data == null) return;
+
+        long now = System.currentTimeMillis();
+        long last = data.getLong(k("last"));
+        data.setLong(k("last"), now);
+        long minMs = cfgI("min-swap-ticks", 3) * 50L;
+        if (last != 0 && now - last < minMs) {
+            int s = data.incInt(k("s"));
+            if (s >= 2) {
+                fail(data, player, "chestswap gap=" + (now - last) + "ms streak=" + s);
+                data.setInt(k("s"), 0);
+            }
+        } else {
+            data.setInt(k("s"), 0);
+        }
     }
 }
