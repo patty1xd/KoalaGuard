@@ -58,6 +58,16 @@ public final class PlayerData {
     public volatile String packetBrand = "vanilla";
     public volatile boolean flagBadBrand;
 
+    // ── transaction / keepalive (lag compensation) ──
+    public volatile int transactionPing = -1;       // round-trip ms from Ping/Pong
+    public volatile long lastPongMs;
+    public volatile long confirmedTransactions;     // monotonically rising tick clock
+    public volatile long lastTransactionSentMs;
+    public volatile long serverTicks;               // authoritative server-tick counter
+    public volatile long flyingPacketCount;         // monotonic client movement-packet counter
+    /** transaction id -> send nanoTime (pending, awaiting Pong). */
+    public final Map<Integer, Long> pendingTransactions = new java.util.concurrent.ConcurrentHashMap<>();
+
     public final ConcurrentLinkedDeque<Long> flyingTimes = new ConcurrentLinkedDeque<>();
     public final ConcurrentLinkedDeque<Long> attackPacketTimes = new ConcurrentLinkedDeque<>();
     public final ConcurrentLinkedDeque<Long> swingTimes = new ConcurrentLinkedDeque<>();
@@ -148,6 +158,12 @@ public final class PlayerData {
     public Vector pendingVelocity;
     public long pendingVelocityMs;
     public String clientBrand = "vanilla";
+
+    // ═══════════════ SETBACK / LAGBACK ═══════════════
+    public Location lastValidLocation;     // last position that passed prediction
+    public volatile boolean setbackPending;
+    public long lastSetbackMs;
+    public int setbackStreak;
 
     // ═══════════════ TOTEM CYCLE (AutoTotem) ═══════════════
     public volatile long totemPopMs;
