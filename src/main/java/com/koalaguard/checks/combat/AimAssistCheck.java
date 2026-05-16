@@ -32,12 +32,13 @@ public final class AimAssistCheck extends CombatCheck {
 
         double mean = MathUtil.average(nz);
         double var = MathUtil.variance(nz);
+        double entropy = MathUtil.entropy(nz);          // human aim is high-entropy
+        double g = MathUtil.seriesGcd(nz);              // assist snaps to a step
 
-        // repeating granularity
-        double g = nz.get(0);
-        for (Float f : nz) g = MathUtil.gcd(g, f);
+        boolean constantStep = mean > 0.25 && mean < 12 && var < 1.3 && g > 0.05 && g < 6;
+        boolean roboticEntropy = mean > 0.25 && mean < 12 && entropy < 1.2;
 
-        if (mean > 0.25 && mean < 12 && var < 1.3 && g > 0.05 && g < 6) {
+        if (constantStep || roboticEntropy) {
             double buf = d.addBuffer(k("b"), 3.0, 9.0);
             if (buf >= 6.0) {
                 fail(d, attacker, String.format("constant-aim mean=%.2f var=%.3f gcd=%.3f", mean, var, g));

@@ -10,19 +10,24 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AutoTotem — TotemGuard-style "totem cycle" model.
+ * AutoTotem — TotemGuard "totem cycle" model, fixed.
  *
- * A cycle = totem pops ({@link EntityResurrectEvent}) → time until a totem
- * is back in the off-hand. Three independent signals:
- *   A) Single ping-compensated re-equip faster than a human can (≈ <150 ms).
- *   B) Unnaturally low standard deviation of re-equip times across cycles
- *      (a bot's timing clusters; a human's scatters).
- *   C) Client brand / plugin message advertises an autototem mod (BadPackets).
+ * The old build could NEVER fire: it ran the global safety gate, which
+ * suppresses everything for the damage-grace window — but a totem only pops
+ * *because* the player just took lethal damage. It now uses the basic gate
+ * (server health + teleport only) and transaction-measured latency.
+ *
+ * Cycle = pop ({@link EntityResurrectEvent}) → time until a totem is back in
+ * a hand (polled every tick until it returns). Signals:
+ *   A) single ping-compensated re-equip faster than humanly possible,
+ *   B) unnaturally low std-dev of re-equip times across cycles,
+ *   C) client brand / plugin message advertises an autototem mod.
  */
 public final class AutoTotemCheck extends ListenerCheck {
 
@@ -41,44 +46,48 @@ public final class AutoTotemCheck extends ListenerCheck {
         if (d.flagBadBrand) {
             fail(d, player, "client brand advertises autototem: " + d.packetBrand);
         }
+        if (d.awaitingTotem) return; // a cycle is already being measured
 
         final long pop = System.currentTimeMillis();
         d.totemPopMs = pop;
         d.awaitingTotem = true;
-        sample(player, d, pop, 1);
-    }
 
-    /** Re-checks the off-hand at 1,2,3,5,8 ticks until a totem returns. */
-    private void sample(Player player, PlayerData d, long pop, int tick) {
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
-            if (!player.isOnline() || !d.isAlive() || !d.awaitingTotem) return;
-            boolean hasTotem = player.getInventory().getItemInOffHand().getType() == Material.TOTEM_OF_UNDYING;
+        final int[] ticks = {0};
+        final BukkitTask[] holder = new BukkitTask[1];
+        holder[0] = plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
+            if (!player.isOnline() || !d.isAlive()) { d.awaitingTotem = false; holder[0].cancel(); return; }
+            ticks[0]++;
+            boolean hasTotem =
+                    player.getInventory().getItemInOffHand().getType() == Material.TOTEM_OF_UNDYING
+                 || player.getInventory().getItemInMainHand().getType() == Material.TOTEM_OF_UNDYING;
             if (hasTotem) {
                 d.awaitingTotem = false;
+                holder[0].cancel();
                 process(player, d, System.currentTimeMillis() - pop);
-            } else if (tick < 9) {
-                int next = tick == 1 ? 2 : tick == 2 ? 3 : tick == 3 ? 5 : 8;
-                sample(player, d, pop, next);
-            } else {
-                d.awaitingTotem = false; // gave up — manual / no totem
+            } else if (ticks[0] >= 30) { // 1.5 s — gave up (manual / no totem left)
+                d.awaitingTotem = false;
+                holder[0].cancel();
             }
-        }, tick == 1 ? 1L : 1L);
+        }, 1L, 1L);
     }
 
     private void process(Player player, PlayerData d, long delay) {
-        if (plugin.getSafetyManager().shouldSuppress(d, player)) return;
+        if (plugin.getSafetyManager().shouldSuppressBasic(d, player)) return;
 
-        int ping = plugin.getMetrics().pingMs(player);
+        int ping = d.transactionPing > 0 ? d.transactionPing : plugin.getMetrics().pingMs(player);
         long comp = Math.max(0, delay - (ping > 0 ? ping / 2L : 0));
 
         d.totemReequipSamples.addLast(comp);
         while (d.totemReequipSamples.size() > 20) d.totemReequipSamples.removeFirst();
 
+        if (debug()) plugin.getLogger().info("[AutoTotem] " + player.getName()
+                + " cycle delay=" + delay + "ms comp=" + comp + "ms ping=" + ping);
+
         // A — impossibly fast single cycle
         if (comp < cfgL("min-reequip-ms", 150L)) {
             int s = d.incInt(k("fast"));
             if (s >= 2) {
-                fail(d, player, "re-equip " + comp + "ms (ping-comp) streak=" + s);
+                fail(d, player, "re-equip " + comp + "ms (ping-comp, " + delay + "ms raw) streak=" + s);
                 d.setInt(k("fast"), 0);
             }
         } else {
@@ -86,11 +95,11 @@ public final class AutoTotemCheck extends ListenerCheck {
         }
 
         // B — machine-consistent timing across cycles
-        if (d.totemReequipSamples.size() >= cfgI("sample-size", 8)) {
+        if (d.totemReequipSamples.size() >= cfgI("sample-size", 6)) {
             List<Long> s = new ArrayList<>(d.totemReequipSamples);
             double mean = MathUtil.average(s);
             double sd = MathUtil.standardDeviation(s);
-            if (sd < cfgD("max-stddev", 32.0) && mean < cfgD("max-mean-ms", 900.0)) {
+            if (sd < cfgD("max-stddev", 35.0) && mean < cfgD("max-mean-ms", 950.0)) {
                 fail(d, player, String.format("consistent re-equip mean=%.0fms sd=%.1f n=%d",
                         mean, sd, s.size()));
                 d.totemReequipSamples.clear();

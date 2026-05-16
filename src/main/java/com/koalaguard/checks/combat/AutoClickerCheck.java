@@ -45,8 +45,17 @@ public final class AutoClickerCheck extends CombatCheck {
             double var = MathUtil.variance(iv);
             int dupes = MathUtil.duplicates(iv);
             double mean = MathUtil.average(iv);
-            if (var < 100 && dupes >= 7 && mean > 25) {
-                fail(d, attacker, String.format("machine cps=%d var=%.1f dupes=%d", cps, var, dupes));
+            double entropy = MathUtil.entropy(iv);   // human clicking is high-entropy
+            double kurt = MathUtil.kurtosis(iv);      // bots over-peak or perfectly flat
+
+            // machine: regular intervals (low var/entropy + dupes) OR a
+            // pathological distribution shape (extreme kurtosis) at real CPS.
+            boolean regular = var < 110 && dupes >= 7 && mean > 25;
+            boolean lowEntropy = entropy < 1.4 && mean > 25;
+            boolean shaped = Math.abs(kurt) > 6.0 && var < 400;
+            if (regular || lowEntropy || shaped) {
+                fail(d, attacker, String.format("machine cps=%d var=%.0f ent=%.2f kurt=%.1f",
+                        cps, var, entropy, kurt));
                 d.attackPacketTimes.clear();
             }
         }
