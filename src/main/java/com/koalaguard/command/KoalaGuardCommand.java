@@ -69,7 +69,7 @@ public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
                     plugin.getDiscordBot().isConnected() ? NamedTextColor.GREEN : NamedTextColor.RED);
             case "checks" -> {
                 sender.sendMessage(prefix().append(Component.text("Loaded checks:", NamedTextColor.GRAY)));
-                plugin.getCheckManager().all().values().forEach(c ->
+                plugin.getEngine().all().values().forEach(c ->
                         sender.sendMessage(Component.text("  • ", BRAND)
                                 .append(Component.text(c.getName(), NamedTextColor.WHITE))
                                 .append(Component.text(" (" + c.getCategory().display() + ") ", NamedTextColor.DARK_GRAY))
