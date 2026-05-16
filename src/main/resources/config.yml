@@ -1,28 +1,28 @@
 # ════════════════════════════════════════════════════════════════
-#  KoalaGuard — Paper 1.21.11 anticheat
-#  Alerts are rich (hover + colour in-game, embeds in Discord).
-#  Defaults are tuned for ZERO false positives on a laggy network.
+#  KoalaGuard — server-authoritative anticheat (Paper 1.21.11)
+#
+#  There are NO timing/cps/ms/distance thresholds. Every check runs
+#  against packet-reconstructed, tick-simulated state and only acts on
+#  PERSISTENT divergence (a sustained violation score), never a spike.
+#  Defaults are tuned for zero false positives on a laggy network.
 # ════════════════════════════════════════════════════════════════
 
-# Verbose per-flag debug to console.
 debug: false
 
 messages:
   prefix: "&b[KoalaGuard] "
 
 alerts:
-  # Players with this permission see in-game alerts.
   permission: "koalaguard.alerts"
   console: true
 
 punishments:
-  # Broadcast punishments to everyone (false = staff only).
   broadcast: false
 
 # ── Anti-false-positive gate ─────────────────────────────────────
-# A flag is DROPPED entirely while any of these are true.
+# A confirmed violation is still DROPPED while any of these hold. The
+# engine additionally has its own rolling-median RTT instability gate.
 safety:
-  # Bans are OFF until you trust your tuning. Ban punishments fall back to kick.
   allow-bans: false
   max-ping-ms: 320
   min-tps: 17.5
@@ -32,20 +32,13 @@ safety:
   damage-grace-ms: 600
   join-grace-ms: 3500
   respawn-grace-ms: 2500
-  # When server is unstable, downgrade any punishment to this.
   unstable-downgrade: "warn"
 
-# ── Violation level decay ────────────────────────────────────────
-# Every <decay-interval>s each check's VL drops by <violation-decay>.
+# ── Violation level decay (the kept punishment pipeline) ─────────
 violation-decay: 1.0
 decay-interval: 30
-# Per clean action a check bleeds this much VL.
 reward-decay: 0.05
 
-# ── Discord (rich embeds) ────────────────────────────────────────
-# 1. https://discord.com/developers/applications → New Application → Bot
-# 2. Copy the bot TOKEN, invite with "Send Messages" + "Embed Links"
-# 3. Enable Developer Mode, right-click your channel → Copy Channel ID
 discord:
   bot-token: ""
   alert-channel-id: ""
@@ -53,70 +46,124 @@ discord:
 # ════════════════════════════════════════════════════════════════
 #  Checks
 #  punishment: warn | kick | ban     ban-duration: 7d | 24h | permanent
-#  max-violations: VL at which the punishment fires
+#  max-violations: confirmed-violation count at which punishment fires
+#  Tunables below are envelope/score knobs, NOT raw metric thresholds.
 # ════════════════════════════════════════════════════════════════
 checks:
 
-  # ── MOVEMENT ──
-  speed:        { enabled: true, max-violations: 20, punishment: kick, ban-duration: 7d }
-  strafe:       { enabled: true, max-violations: 18, punishment: kick, ban-duration: 7d }
-  motion:       { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
-  fly:          { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d }
-  nofall:       { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  step:         { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
-  jesus:        { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  noslow:       { enabled: true, max-violations: 15, punishment: kick, ban-duration: 7d }
-  # Modern MC allows omnidirectional sprint — only the hunger<=6 impossible state remains. Off by default.
-  sprint:       { enabled: false, max-violations: 18, punishment: kick, ban-duration: 7d }
-  phase:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  timer:        { enabled: true, max-violations: 14, punishment: kick, ban-duration: 7d, balance: 12.0 }
-  fastclimb:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  # FP-prone without full physics sim; off by default.
-  antihunger:   { enabled: false, max-violations: 15, punishment: kick, ban-duration: 7d }
-  web:          { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  elytrafly:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d }
-  blink:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
-  scaffold:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d, max-place-rate: 11, max-angle: 85.0 }
-  burrow:       { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d }
+  # ── MOVEMENT (server-authoritative physics) ──
+  prediction:
+    enabled: true
+    max-violations: 14
+    punishment: kick
+    ban-duration: 14d
+    horizontal-epsilon: 0.0015
+    vertical-epsilon: 0.02
+    score-scale: 24.0
+    threshold: 8.0
+    min-streak: 6
+    confirm-cooldown-ticks: 20
 
-  # ── COMBAT ──
-  reach:        { enabled: true, max-violations: 12, punishment: kick, ban-duration: 14d, max-reach: 3.0 }
-  killaura:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: permanent }
-  autoclicker:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d, max-cps: 22 }
-  attackspeed:  { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  hitbox:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  aimassist:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  noswing:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  invalidattack: { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d }
-  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  tbot:         { enabled: true, max-violations: 8,  punishment: kick, ban-duration: permanent, min-streak: 6 }
-  velocity:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  surround:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  selftrap:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  crystalaura:  { enabled: true, max-violations: 7,  punishment: kick, ban-duration: permanent, max-hits-per-sec: 6 }
-  bowaimbot:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d }
-  autototem:    { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, min-reequip-ms: 150, sample-size: 6, max-stddev: 35.0, max-mean-ms: 950.0 }
-  autoarmor:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  autoweapon:   { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  offhand:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-swaps-per-sec: 10 }
+  phase:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    score-per-tick: 6.0
+    threshold: 14.0
+    min-streak: 3
 
-  # ── PLAYER ──
-  airplace:     { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 7d }
-  chestswap:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, min-swap-ticks: 3 }
-  autoeat:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  autoreplenish: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  fastuse:      { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  regen:        { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  autofish:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
-  expthrower:   { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  inventoryhack: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-clicks-per-sec: 18 }
-  inventorymove: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  autotool:     { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
-  fastplace:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-per-sec: 12 }
-  blockreach:   { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-reach: 5.2 }
-  speedmine:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d }
+  nofall:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    min-fall: 3.2
+    score: 6.0
+    threshold: 12.0
+    min-streak: 2
 
-  # ── WORLD ──
-  nuker:        { enabled: true, max-violations: 7,  punishment: kick, ban-duration: permanent, max-distance: 6.0, max-breaks-per-sec: 8 }
-  fastbreak:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 7d }
-  autosmelter:  { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, max-extracts-per-sec: 5 }
+  timer:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    window-ticks: 60
+    max-ratio-excess: 0.18
+    score-scale: 40.0
+    threshold: 10.0
+    min-streak: 2
+
+  # ── COMBAT (reconstructed-position raytrace + aim) ──
+  reach:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 14d
+    max-reach: 3.0
+    max-jitter-slack: 0.5
+    score-scale: 18.0
+    threshold: 9.0
+    min-streak: 3
+
+  hitvalidation:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 30d
+    angle-slack-deg: 9.0
+    angle-score-scale: 0.6
+    noswing-score: 5.0
+    swing-window-ticks: 4
+    threshold: 9.0
+    min-streak: 4
+
+  rotation:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 30d
+    combat-window-ticks: 50
+    samples: 40
+    min-samples: 26
+    min-active: 16
+    min-entropy: 1.35
+    entropy-scale: 18.0
+    min-gcd: 0.30
+    gcd-score: 5.0
+    snap-mean: 12.0
+    max-pitch-sd: 0.06
+    snaplock-score: 5.0
+    threshold: 16.0
+    min-streak: 5
+
+  velocity:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    min-knockback: 0.10
+    window-ticks: 6
+    min-fraction: 0.33
+    score-scale: 22.0
+    threshold: 9.0
+    min-streak: 3
+
+  # ── INVENTORY (interaction-chain state machines) ──
+  inventorychain:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    score: 4.0
+    threshold: 12.0
+    min-streak: 4
+
+  autototem:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    score: 6.0
+    threshold: 8.0
+    min-streak: 2
