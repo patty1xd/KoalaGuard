@@ -53,9 +53,18 @@ public abstract class SimCheck extends Check {
                            int minStreak, String detail, boolean setback) {
         ViolationScore vs = score(ctx);
         vs.add(amount);
+        if (debug()) {
+            plugin.getLogger().info("[" + getName() + "] " + ctx.player.getName()
+                    + " score=" + String.format("%.2f", vs.score())
+                    + "/" + threshold + " streak=" + vs.badStreak()
+                    + "/" + minStreak + " :: " + detail);
+        }
         if (vs.consume(threshold, minStreak, ctx.tick, cooldownTicks())) {
-            if (setback) failAndSetback(ctx.data, ctx.player, detail);
-            else         fail(ctx.data, ctx.player, detail);
+            // The check already gated on instability via the CheckContext;
+            // use the resolved path so combat flags aren't dropped by the
+            // movement damage/velocity grace.
+            if (setback) failResolvedAndSetback(ctx.data, ctx.player, detail);
+            else         failResolved(ctx.data, ctx.player, detail);
         }
     }
 
