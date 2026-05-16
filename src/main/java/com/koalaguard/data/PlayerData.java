@@ -68,6 +68,17 @@ public final class PlayerData {
     /** transaction id -> send nanoTime (pending, awaiting Pong). */
     public final Map<Integer, Long> pendingTransactions = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * One frame per position-bearing client packet (= one client movement
+     * tick). Drained on the main thread so deltas are EXACT per client tick
+     * and never aliased to the server tick. Frame = {x,y,z,yaw,pitch,ground}.
+     */
+    public final java.util.Queue<double[]> moveQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    // last processed frame (main thread only)
+    public double prevX, prevY, prevZ;
+    public float prevYaw, prevPitch;
+    public boolean moveInit;
+
     public final ConcurrentLinkedDeque<Long> flyingTimes = new ConcurrentLinkedDeque<>();
     public final ConcurrentLinkedDeque<Long> attackPacketTimes = new ConcurrentLinkedDeque<>();
     public final ConcurrentLinkedDeque<Long> swingTimes = new ConcurrentLinkedDeque<>();
