@@ -19,10 +19,19 @@ public final class LocationUtil {
      */
     public static boolean isOnGround(Player player) {
         Location loc = player.getLocation();
+        return isOnGround(loc.getWorld(), loc.getX(), loc.getY(), loc.getZ());
+    }
+
+    /** Ground check at explicit coords — used when replaying queued frames. */
+    public static boolean isOnGround(org.bukkit.World world, double x, double y, double z) {
+        if (world == null) return true;
         double[] off = {-0.3, 0.0, 0.3};
         for (double ox : off) {
             for (double oz : off) {
-                Block b = loc.clone().add(ox, -0.02, oz).getBlock();
+                Block b = world.getBlockAt(
+                        (int) Math.floor(x + ox),
+                        (int) Math.floor(y - 0.02),
+                        (int) Math.floor(z + oz));
                 if (isSolid(b)) return true;
             }
         }
