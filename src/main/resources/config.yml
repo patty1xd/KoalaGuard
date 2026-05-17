@@ -241,10 +241,12 @@ checks:
     threshold: 12.0
     min-streak: 4
 
-  # Server-event driven (EntityResurrect + InventoryClick/SwapHand). Works
-  # regardless of how the cheat sends packets, while standing still, and under
-  # rapid pops. Transaction-tick clock — never wall-clock ms / ping subtraction.
-  # A legit totem STACK fires no inventory event → impossible to false-positive.
+  # Pop = EntityResurrectEvent (server-applied, 100% reliable, fires while
+  # still). Re-equip = server inventory mirror off-hand→totem transition
+  # (version-independent — does NOT depend on Bukkit InventoryClickEvent
+  # firing, which synthetic packet moves often skip; that was why it never
+  # detected). A legit totem STACK only decrements (off hand never stops being
+  # a totem) and sends no inventory packet → impossible to false-positive.
   autototem:
     enabled: true
     max-violations: 8
@@ -253,14 +255,16 @@ checks:
     threshold: 9.0
     min-streak: 2
     brand-score: 12.0           # S3 brand advertises autototem
-    combat-score: 9.0           # S0 re-equip while attacking (GUI impossible)
+    packet-score: 10.0          # S0 packet-move re-equip while moving/attacking
     fast-ticks: 3               # S1 re-equip within N transaction ticks
-    fast-score: 4.0
+    fast-score: 5.0
     consistency-score: 9.0      # S2 machine-uniform interval
     min-samples: 5
     sample-cap: 30
-    max-sd-ticks: 1.5
-    max-mean-ticks: 14.0
+    max-sd-ticks: 1.6
+    max-mean-ticks: 16.0
+    instant-ticks: 1            # sub-tick refill seen as same-tick as the pop
+    await-timeout-ticks: 200    # abandon a pop whose re-equip never comes
 
   # ── Additional movement checks ──
   clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1 }
@@ -271,7 +275,10 @@ checks:
   elytrafly:    { enabled: false, max-violations: 10, punishment: kick, ban-duration: 14d, min-climb-dy: 0.15, rocket-window-ms: 3000, score: 3.0, threshold: 12.0, min-streak: 25 }
 
   # ── Additional combat checks ──
-  killaura:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: permanent, multi-window-ns: 800000000, max-targets: 3, multi-score: 5.0, sample-cap: 30, min-samples: 12, max-mean-deg: 2.0, max-sd-deg: 1.2, aim-score: 8.0, max-cone-deg: 70.0, cone-score: 7.0, threshold: 10.0, min-streak: 3 }
+  # Time-aligned: every signal is reconstructed at the EXACT attack tick (the
+  # reconstruction that makes Reach reliable), not the live eye/rotation the
+  # old version used — which is why a precise silent aura now flags.
+  killaura:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: permanent, multi-window-ns: 800000000, max-targets: 3, multi-score: 5.0, sample-cap: 30, min-samples: 14, max-mean-deg: 3.0, max-sd-deg: 1.4, aim-score: 8.0, wall-score: 8.0, snap-min-deg: 28.0, snap-lock-cone-deg: 9.0, snap-calm-deg: 4.0, snap-score: 7.0, threshold: 10.0, min-streak: 3 }
   crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, score-scale: 4.0, threshold: 9.0, min-streak: 3 }
   criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, score: 4.0, threshold: 10.0, min-streak: 5 }
 
@@ -279,4 +286,8 @@ checks:
   inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
   offhandcrash: { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, window-ns: 80000000, max-swaps-per-tick: 3, score-scale: 5.0, threshold: 9.0, min-streak: 2 }
   multiplace:   { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, window-ns: 70000000, max-places-per-tick: 3, score-scale: 4.0, threshold: 10.0, min-streak: 2 }
-  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 75.0, max-reach: 6.0, score: 4.0, threshold: 12.0, min-streak: 4 }
+  # Time-aligned to the EXACT place tick + real clicked FACE (not the loose
+  # live-eye/block-centre the old version used).
+  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 60.0, max-reach: 5.2, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, sample-cap: 24, min-samples: 8, max-sd-interval: 0.85, max-sd-pitch: 1.2, cadence-score: 6.0, threshold: 11.0, min-streak: 3 }
+  # AutoWeb — automatic cobweb placement on/around an opponent in combat.
+  autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, attack-window-ticks: 4, combat-radius: 5.0, max-angle: 55.0, aim-score: 6.0, combat-score: 5.0, sample-cap: 20, min-samples: 6, max-sd-interval: 0.9, cadence-score: 6.0, threshold: 10.0, min-streak: 3 }
