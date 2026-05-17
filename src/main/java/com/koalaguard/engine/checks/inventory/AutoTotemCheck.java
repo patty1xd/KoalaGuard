@@ -4,101 +4,100 @@ import com.koalaguard.KoalaGuard;
 import com.koalaguard.check.CheckCategory;
 import com.koalaguard.engine.check.CheckContext;
 import com.koalaguard.engine.check.SimCheck;
-import com.koalaguard.engine.packet.CapturedPacket;
-import com.koalaguard.engine.packet.PacketKind;
+import com.koalaguard.engine.state.InventoryState;
+import com.koalaguard.util.MathUtil;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * AutoTotem — dead-simple, decode-independent, continuous.
+ * AutoTotem — driven by SERVER-side Bukkit events, not raw packet decoding.
  *
- * The single fact every AutoTotem cannot avoid: to put a totem in the off hand
- * it must send inventory-click packets, and (Meteor and friends) it sends the
- * pickup+place as 2-3 ClickSlot packets in the SAME tick — a human physically
- * cannot send two inventory clicks 50 ms apart, let alone repeatedly, let
- * alone while fighting. We detect THAT, needing nothing decoded beyond "a
- * window-click happened":
+ * The server fires {@code EntityResurrectEvent} the instant a totem pops, and
+ * {@code InventoryClickEvent}/{@code PlayerSwapHandItemsEvent} the instant the
+ * totem is moved back to the off hand — no matter how the cheat crafted the
+ * packet, and even when the player is perfectly still. {@link com.koalaguard
+ * .listener.BukkitStateListener} records the pop and the re-equip; this check
+ * just judges the relationship (TotemGuard methodology, on the
+ * confirmed-transaction tick clock — no wall-clock ms, no ping subtraction):
  *
- *  S0  ≥2 CLICK_WINDOW packets within one tick   → primary, self-sufficient.
- *  S1  a CLICK_WINDOW within 250 ms of an entity ATTACK (the inventory GUI
- *      cannot be open while you are attacking)   → covers slow 1-click/tick.
- *  S2  brand / plugin-message advertises autototem.
+ *  S0  re-equip happened while the player was ATTACKING — the inventory GUI
+ *      cannot be open while you swing at an entity → impossible by hand.
+ *  S1  re-equip faster than a human can notice+act (few transaction ticks).
+ *  S2  machine-consistent re-equip interval across many pops (low sd + mean).
+ *  S3  brand / plugin-message advertises an autototem mod.
  *
- * A legit player carrying a totem stack sends NO clicks (stack just
- * decrements) → nothing fires. A legit manual re-equip is ONE slow click with
- * the GUI open (no concurrent attack, not clustered) → nothing fires.
+ * FP-proof: a legit totem STACK in the off hand fires NEITHER inventory event
+ * (the stack just decrements) → reequipSeq never advances → nothing is judged.
+ * A manual re-equip fires the event but is slow, variable, and not done while
+ * attacking → no signal trips.
  */
 public final class AutoTotemCheck extends SimCheck {
 
-    private static final class S { long lastSeq = Long.MIN_VALUE; }
+    private static final class S {
+        long lastReequipSeq = Long.MIN_VALUE;
+        final Deque<Long> intervals = new ArrayDeque<>();   // transaction ticks
+    }
+
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
 
     public AutoTotemCheck(KoalaGuard plugin) {
-        super(plugin, "autototem", CheckCategory.COMBAT, "Automated totem equip (click burst)");
+        super(plugin, "autototem", CheckCategory.COMBAT, "Automated totem re-equip");
     }
 
     @Override
     public void onTick(CheckContext ctx) {
+        InventoryState inv = ctx.state.inv;
         UUID id = ctx.data.getUuid();
         S s = state.computeIfAbsent(id, k -> new S());
 
-        if (ctx.data.flagBadBrand) {                                   // S2
+        if (ctx.data.flagBadBrand) {                                       // S3
             diverge(ctx, cfgD("brand-score", 12.0), cfgD("threshold", 9.0), 1,
                     "client brand advertises autototem: " + ctx.data.packetBrand, false);
         }
 
-        List<CapturedPacket> recent = ctx.state.log.recent(192);
-        List<CapturedPacket> chrono = new ArrayList<>(recent);
-        java.util.Collections.reverse(chrono);
+        if (inv.reequipSeq == s.lastReequipSeq) { clean(ctx, 0.05); return; }
+        s.lastReequipSeq = inv.reequipSeq;                                 // new cycle
 
-        long clusterNs = cfgL("cluster-window-ns", 70_000_000L);
-        long attackNs  = cfgL("attack-window-ns", 250_000_000L);
+        long interval = Math.max(0, inv.reequipConf - inv.totemPopConf);
+        s.intervals.addLast(interval);
+        while (s.intervals.size() > cfgI("sample-cap", 30)) s.intervals.removeFirst();
 
-        long maxSeen = s.lastSeq;
         double bad = 0;
         StringBuilder why = new StringBuilder();
-        int clicksSeen = 0;
 
-        for (CapturedPacket p : chrono) {
-            if (p.kind != PacketKind.CLICK_WINDOW) continue;
-            clicksSeen++;
-            if (p.seq > maxSeen) maxSeen = p.seq;
-            if (p.seq <= s.lastSeq) continue;                          // already judged
-
-            int near = 0;
-            boolean attacking = false;
-            for (CapturedPacket q : chrono) {
-                if (q.kind == PacketKind.CLICK_WINDOW
-                        && Math.abs(q.recvNanos - p.recvNanos) <= clusterNs) near++;
-                if (q.kind == PacketKind.INTERACT_ENTITY
-                        && String.valueOf(q.objA).contains("ATTACK")
-                        && Math.abs(q.recvNanos - p.recvNanos) <= attackNs) attacking = true;
-            }
-            if (near >= cfgI("cluster-min", 2)) {                      // S0
-                bad += cfgD("cluster-score", 9.0);
-                why.append("burst=").append(near).append("clk/tick ");
-            }
-            if (attacking) {                                           // S1
-                bad += cfgD("combat-score", 7.0);
-                why.append("inv-click while attacking ");
+        if (inv.reequipBusy) {                                             // S0
+            bad += cfgD("combat-score", 9.0);
+            why.append("re-equip while attacking ");
+        }
+        if (interval <= cfgI("fast-ticks", 3)) {                           // S1
+            bad += cfgD("fast-score", 4.0);
+            why.append("fast=").append(interval).append("t ");
+        }
+        if (s.intervals.size() >= cfgI("min-samples", 5)) {                // S2
+            double mean = MathUtil.average(s.intervals);
+            double sd = MathUtil.standardDeviation(s.intervals);
+            if (sd < cfgD("max-sd-ticks", 1.5) && mean < cfgD("max-mean-ticks", 14.0)) {
+                bad += cfgD("consistency-score", 9.0);
+                why.append(String.format("consistent mean=%.1ft sd=%.2f n=%d ",
+                        mean, sd, s.intervals.size()));
             }
         }
-        s.lastSeq = maxSeen;
 
-        if (debug() && clicksSeen > 0) {
+        if (debug()) {
             plugin.getLogger().info("[autototem] " + ctx.player.getName()
-                    + " window-clicks visible=" + clicksSeen + " bad=" + bad);
+                    + " cycle interval=" + interval + "t busy=" + inv.reequipBusy
+                    + " n=" + s.intervals.size() + " bad=" + bad);
         }
 
         if (bad > 0) {
             diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 2),
                     "autototem :: " + why.toString().trim(), false);
         } else {
-            clean(ctx, 0.4);
+            clean(ctx, 2.0);
         }
     }
 
