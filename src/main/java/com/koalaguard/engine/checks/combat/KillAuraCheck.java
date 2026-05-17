@@ -25,24 +25,24 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * KillAura / Aimbot — REBUILT to be time-aligned.
+ * KillAura / Aimbot — REBUILT so it works WHILE STANDING STILL.
  *
- * The old version measured aim from the LIVE server eye + the LATEST sent
- * rotation against the victim's LIVE hitbox, evaluated a whole tick after the
- * hit. Nothing lined up: a precise silent aura passed the loose 70° cone and
- * the statistical path drowned in the timing noise — which is exactly why it
- * never detected. Every signal here is reconstructed at the EXACT tick the
- * attack packet was bound to (the same {@code frameAtOrBefore} reconstruction
- * that makes Reach/Criticals reliable), so tight, FP-safe thresholds work.
+ * The previous versions read snap/aim from {@code recentFrames()} (position
+ * frames). A player testing an aura sends ROTATION-only packets — those update
+ * the rotation history but create NO position frame — so that array was empty
+ * and the check evaluated nothing. THAT is why it never detected. Everything
+ * here is driven by the rotation history ({@code yawDeltas}/{@code pitchDeltas},
+ * updated on every rotation packet) and the captured attack packets, none of
+ * which need the player to be moving.
  *
- *  S0  Through-wall hit — the reconstructed eye→victim segment is obstructed by
- *      a solid block. You cannot melee an entity through a wall.
- *  S1  Snap-aim — a large single-tick rotation lands the look precisely on the
- *      target on the attack tick while the player is otherwise barely turning
- *      (the rotation is DRIVEN by the attack, not by the player).
- *  S2  Machine aim — over a large sample of hits the time-aligned aim error has
- *      a tiny mean AND tiny std-dev (a human has spread; an aimbot centres it).
- *  S3  Multi-target — distinct living targets struck within a short window.
+ *  S0  No-aim hit — at the attack, the SENT look is outside the victim's
+ *      hitbox cone (you cannot melee what your crosshair is not on). Catches
+ *      silent / no-rotate / backtrack aura.
+ *  S1  Through-wall hit — the eye→victim segment is obstructed by solid blocks.
+ *  S2  Snap aim — a large single rotation step while otherwise barely turning,
+ *      during combat (the rotation is driven by the attack, not the player).
+ *  S3  Machine lock — over many hits the aim error mean AND std-dev are tiny.
+ *  S4  Multi-target — distinct living targets struck within a short window.
  */
 public final class KillAuraCheck extends SimCheck {
 
@@ -54,7 +54,7 @@ public final class KillAuraCheck extends SimCheck {
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
 
     public KillAuraCheck(KoalaGuard plugin) {
-        super(plugin, "killaura", CheckCategory.COMBAT, "Aimbot / through-wall / multi-target aura");
+        super(plugin, "killaura", CheckCategory.COMBAT, "Aimbot / no-aim / through-wall aura");
     }
 
     @Override
@@ -67,11 +67,10 @@ public final class KillAuraCheck extends SimCheck {
         List<CapturedPacket> chrono = new ArrayList<>(recent);
         java.util.Collections.reverse(chrono);
 
-        // Per-tick rotation delta map for the snap signal (tick -> |dYaw|).
-        List<PositionFrame> frames = ctx.state.recentFrames(96);
-        double turnSum = 0; int turnN = 0;
-        for (PositionFrame f : frames) { turnSum += f.dYaw; turnN++; }
-        double avgTurn = turnN > 0 ? turnSum / turnN : 0;
+        // Rotation history — populated by EVERY rotation packet, even when the
+        // player never moves. This is the fix.
+        List<Float> yd = ctx.state.yawDeltas(cfgI("rot-samples", 40));
+        List<Float> pd = ctx.state.pitchDeltas(cfgI("rot-samples", 40));
 
         long windowNs = cfgL("multi-window-ns", 800_000_000L);
         long newest = -1;
@@ -79,15 +78,13 @@ public final class KillAuraCheck extends SimCheck {
             if (p.kind == PacketKind.INTERACT_ENTITY
                     && String.valueOf(p.objA).contains("ATTACK")) { newest = p.recvNanos; break; }
         }
+        boolean inCombat = newest >= 0
+                && (System.nanoTime() - newest) <= cfgL("combat-window-ns", 1_500_000_000L);
 
         long maxSeen = s.lastSeq;
         Set<Integer> targets = new HashSet<>();
         double bad = 0;
         StringBuilder why = new StringBuilder();
-
-        double snapMin   = cfgD("snap-min-deg", 28.0);
-        double lockCone  = cfgD("snap-lock-cone-deg", 9.0);
-        double calmTurn  = cfgD("snap-calm-deg", 4.0);
 
         for (CapturedPacket p : chrono) {
             if (p.kind != PacketKind.INTERACT_ENTITY) continue;
@@ -104,63 +101,73 @@ public final class KillAuraCheck extends SimCheck {
             Entity victim = Combat.resolveById(ctx.player, p.intA, 8.0);
             if (!(victim instanceof LivingEntity) || victim == ctx.player) continue;
 
-            // Reconstruct the eye/look at the EXACT attack tick.
+            // Eye/look at the attack: reconstructed frame if one exists, else
+            // the authoritative live eye/look (correct for a still attacker).
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
             double[] el = Combat.eyeLook(f, ctx.player);
             double ex = el[0], ey = el[1], ez = el[2];
             float yaw = (float) el[3], pitch = (float) el[4];
 
+            BoundingBox b = victim.getBoundingBox();
             double err = Combat.aimAngle(ex, ey, ez, yaw, pitch, victim);
+            double dist = Math.max(0.5, Combat.distanceToBox(ex, ey, ez, victim));
+            double radius = Math.max(b.getWidthX(), b.getHeight()) / 2.0 + 0.10;
+            double cone = Math.toDegrees(Math.atan2(radius, dist))
+                    + cfgD("aim-slack-deg", 12.0);
+
             s.aimErr.addLast(err);
             while (s.aimErr.size() > cfgI("sample-cap", 30)) s.aimErr.removeFirst();
 
-            // S0 — through-wall hit.
-            BoundingBox b = victim.getBoundingBox();
-            if (CollisionEngine.rayBlocked(ctx.player.getWorld(), ex, ey, ez,
-                    b.getCenterX(), b.getCenterY(), b.getCenterZ())) {
-                bad += cfgD("wall-score", 8.0);
-                why.append("through-wall hit ");
+            if (err > cone) {                                       // S0 no-aim
+                bad += Math.min(cfgD("noaim-max", 9.0),
+                        (err - cone) * cfgD("noaim-scale", 0.25));
+                why.append(String.format("hit %.0f° off (cone %.0f°) ", err, cone));
             }
 
-            // S1 — snap onto target: a big single-tick turn near the attack
-            // tick that lands the aim inside a tight cone, while the player is
-            // otherwise barely turning.
-            double snap = 0;
-            for (PositionFrame g : frames) {
-                if (g.tick <= p.tickIndex && g.tick >= p.tickIndex - 2) {
-                    snap = Math.max(snap, g.dYaw);
-                }
-            }
-            if (snap >= snapMin && err <= lockCone && avgTurn <= calmTurn) {
-                bad += cfgD("snap-score", 7.0);
-                why.append(String.format("snap %.0f°->%.1f° ", snap, err));
+            if (CollisionEngine.rayBlocked(ctx.player.getWorld(), ex, ey, ez,
+                    b.getCenterX(), b.getCenterY(), b.getCenterZ())) {     // S1
+                bad += cfgD("wall-score", 8.0);
+                why.append("through-wall ");
             }
         }
         s.lastSeq = maxSeen;
 
-        // S2 — machine aim over a large time-aligned sample.
+        // S2 — snap: a big single rotation step while the rest is calm.
+        if (inCombat && !yd.isEmpty()) {
+            double mx = 0, sum = 0;
+            for (float v : yd) { mx = Math.max(mx, v); sum += v; }
+            for (float v : pd) mx = Math.max(mx, v);
+            double avg = sum / yd.size();
+            if (mx >= cfgD("snap-min-deg", 30.0) && avg <= cfgD("snap-calm-deg", 4.0)) {
+                bad += cfgD("snap-score", 6.0);
+                why.append(String.format("snap %.0f° (avg %.1f°) ", mx, avg));
+            }
+        }
+
+        // S3 — machine lock over a large sample.
         if (s.aimErr.size() >= cfgI("min-samples", 14)) {
             double mean = MathUtil.average(s.aimErr);
             double sd = MathUtil.standardDeviation(s.aimErr);
             if (mean < cfgD("max-mean-deg", 3.0) && sd < cfgD("max-sd-deg", 1.4)) {
-                bad += cfgD("aim-score", 8.0);
-                why.append(String.format("machine aim mean=%.2f° sd=%.2f° n=%d ",
+                bad += cfgD("aim-score", 7.0);
+                why.append(String.format("machine lock mean=%.2f° sd=%.2f° n=%d ",
                         mean, sd, s.aimErr.size()));
             }
         }
 
-        // S3 — multi-target.
+        // S4 — multi-target.
         int maxT = cfgI("max-targets", 3);
         if (targets.size() >= maxT) {
             bad += (targets.size() - maxT + 1) * cfgD("multi-score", 5.0);
             why.append(targets.size()).append(" targets ");
         }
 
-        if (debug() && !s.aimErr.isEmpty()) {
+        if (debug() && (!s.aimErr.isEmpty() || !yd.isEmpty())) {
             plugin.getLogger().info("[killaura] " + ctx.player.getName()
-                    + " lastErr=" + String.format("%.1f", s.aimErr.peekLast())
-                    + "° n=" + s.aimErr.size() + " avgTurn="
-                    + String.format("%.2f", avgTurn) + " bad=" + bad);
+                    + " lastErr=" + (s.aimErr.isEmpty() ? "-"
+                        : String.format("%.1f", s.aimErr.peekLast()))
+                    + "° n=" + s.aimErr.size() + " inCombat=" + inCombat
+                    + " bad=" + String.format("%.2f", bad));
         }
 
         if (bad > 0) {
