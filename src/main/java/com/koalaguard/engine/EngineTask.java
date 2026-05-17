@@ -176,6 +176,7 @@ public final class EngineTask extends BukkitRunnable {
                 if (act.contains("ATTACK")) {
                     s.combat.lastAttackEntityId = p.intA;
                     s.combat.lastAttackTick = s.tick;
+                    s.combat.lastAttackNanos = p.recvNanos;
                 }
             }
             case ANIMATION -> s.combat.lastSwingTick = s.tick;
