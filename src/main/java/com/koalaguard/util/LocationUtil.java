@@ -62,6 +62,29 @@ public final class LocationUtil {
         return m == Material.WATER || m == Material.LAVA || m == Material.BUBBLE_COLUMN;
     }
 
+    /**
+     * Blocks that override vanilla velocity in ways the simulator does not
+     * model (cobweb multiplies motion by ~0.25/0.05, powder snow / berry bush /
+     * honey / scaffolding all clamp it). Prediction must skip while the player
+     * occupies one, or it false-positives and sets the player back.
+     */
+    public static boolean inSpecialMovementBlock(Player player) {
+        Location l = player.getLocation();
+        for (double oy : new double[]{0.0, 0.9, 1.7}) {
+            if (isSpecialMovementBlock(
+                    l.clone().add(0, oy, 0).getBlock().getType())) return true;
+        }
+        return false;
+    }
+
+    public static boolean isSpecialMovementBlock(Material m) {
+        return m == Material.COBWEB
+            || m == Material.POWDER_SNOW
+            || m == Material.SWEET_BERRY_BUSH
+            || m == Material.HONEY_BLOCK
+            || m == Material.SCAFFOLDING;
+    }
+
     /** Eye location of the attacker to the centre of the victim's hitbox. */
     public static double combatDistance(Player attacker, Entity victim) {
         Location eye = attacker.getEyeLocation();
