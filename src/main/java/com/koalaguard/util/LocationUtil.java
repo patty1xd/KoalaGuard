@@ -85,6 +85,23 @@ public final class LocationUtil {
             || m == Material.SCAFFOLDING;
     }
 
+    /**
+     * Frame-accurate variant: tests the block column at an EXACT reconstructed
+     * position, not the once-per-tick live player location. Knockback in a
+     * fight can put the reconstructed frame inside a cobweb a tick before the
+     * live-location refresh sees it — that desync is the Prediction cobweb FP.
+     */
+    public static boolean inSpecialMovementBlockAt(org.bukkit.World w,
+                                                   double x, double y, double z) {
+        if (w == null) return false;
+        int bx = (int) Math.floor(x), bz = (int) Math.floor(z);
+        for (double oy : new double[]{0.0, 0.9, 1.7}) {
+            if (isSpecialMovementBlock(
+                    w.getBlockAt(bx, (int) Math.floor(y + oy), bz).getType())) return true;
+        }
+        return false;
+    }
+
     /** Eye location of the attacker to the centre of the victim's hitbox. */
     public static double combatDistance(Player attacker, Entity victim) {
         Location eye = attacker.getEyeLocation();
