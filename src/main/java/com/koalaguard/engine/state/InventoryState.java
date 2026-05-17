@@ -24,6 +24,19 @@ public final class InventoryState {
     public long totemConsumedTick = -1;
     public boolean awaitingTotemTransition;
 
+    /**
+     * Pop bookkeeping driven by EntityResurrectEvent (the exact pop moment,
+     * fired before any refill — so an instant autototem can't hide it).
+     * {@code totemPopSeq} is a pure counter (NOT a tick clock) so it advances
+     * even while the player is perfectly still — which is how autototem is
+     * normally tested. {@code totemPopConf} snapshots the always-advancing
+     * confirmed-transaction clock for an accurate, movement-independent
+     * re-equip interval.
+     */
+    public volatile long totemPopSeq;
+    public volatile long totemPopConf;
+    public volatile long totemPopNanos;   // clock-independent "since pop" bound
+
     // Window lifecycle reconstructed purely from packets.
     public boolean containerOpen;
     public int openWindowId = -1;
