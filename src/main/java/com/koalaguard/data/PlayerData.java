@@ -70,6 +70,12 @@ public final class PlayerData {
     public volatile long lastSetbackMs;
     public volatile int setbackStreak;
 
+    // ───────────────── silent combat cancellation ─────────────────
+    /** While now < this, the netty layer drops this player's attack packets
+     *  (combat analog of a movement setback — set only after a CONFIRMED,
+     *  persistent combat violation). */
+    public volatile long combatCancelUntilMs;
+
     private volatile boolean alive = true;
     public boolean isAlive() { return alive; }
     public void invalidate() { alive = false; }
