@@ -200,6 +200,8 @@ public final class EngineTask extends BukkitRunnable {
         s.exDead = player.isDead() || player.getHealth() <= 0.0;
         s.exSpectator = player.getGameMode() == GameMode.CREATIVE
                 || player.getGameMode() == GameMode.SPECTATOR;
+        s.exWeb = LocationUtil.inSpecialMovementBlock(player);
+        if (s.exWeb) s.lastSpecialBlockTick = s.tick;
     }
 
     /**
