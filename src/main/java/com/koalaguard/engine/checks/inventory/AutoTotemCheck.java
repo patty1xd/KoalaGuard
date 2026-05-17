@@ -18,46 +18,48 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * AutoTotem — reworked along TotemGuard's proven methodology, but expressed in
- * this engine's server-authoritative terms (no wall-clock ms, no ping
- * subtraction; the re-equip interval is measured in the confirmed-transaction
- * tick clock, which is itself the lag-comp model).
+ * AutoTotem — combines Meteor-Client's exact packet fingerprint with
+ * TotemGuard's behavioural statistics, on a movement-independent clock.
  *
- * Why the old "is there a swap/click in the chain" model failed: real
- * AutoTotem mods DO send a CLICK_WINDOW (or hotbar toggle), so that gate
- * always passed. The discriminating signals are behavioural, exactly as
- * TotemGuard found:
+ * Why the earlier versions never fired:
+ *  • the pop was identified by the movement-tick counter, which FREEZES while
+ *    the player stands still — exactly how autototem is tested — so every pop
+ *    collapsed into one and the check never re-armed (FIXED: the pop is now an
+ *    EntityResurrectEvent-driven sequence counter + transaction clock);
+ *  • the "is there a click" gate always passed because real autototems DO
+ *    click — the discriminator is HOW they click.
  *
- *  S1 BadPacketsC — two CONSECUTIVE held-item-change packets to the SAME
- *     hotbar slot after a pop. Vanilla never does this; it is the fingerprint
- *     of mods toggling the slot to grab a totem. Packet-only, timing-free.
- *  S2 Consistency — across many cycles the re-equip interval has a tiny
- *     standard deviation AND low mean. A human's reaction is variable; a bot's
- *     is machine-uniform. (TotemGuard AutoTotemB/E/H.)
- *  S3 Fast re-equip — a single interval shorter than a human can notice +
- *     act. Supporting only: never bans alone, must persist/corroborate.
- *  S4 Brand / plugin-message advertises an autototem mod.
+ * Signals (each independently FP-safe; only a sustained score confirms):
+ *  S0  Meteor fingerprint — a CLICK_WINDOW on window 0 / slot 45 (off-hand)
+ *      since the pop while the player is also attacking. Vanilla cannot send
+ *      an inventory click for the player screen while attacking (the GUI is
+ *      not open) → impossible sequence.
+ *  S0b Clustered clicks — ≥2 CLICK_WINDOW packets within one tick (Meteor
+ *      sends pickup+place [+return] in the same tick). Humans cannot.
+ *  S1  BadPacketsC — two consecutive HELD_ITEM_CHANGE to the same slot.
+ *  S2  Consistency — re-equip interval (transaction ticks) has tiny std-dev
+ *      AND low mean across many cycles (machine uniformity).
+ *  S3  Fast re-equip — single interval below human reaction (supporting).
+ *  S4  Brand/plugin-message advertises an autototem mod.
  *
- * FP guards (also from TotemGuard): only the OFF-HAND consume→re-equip arms a
- * cycle (carrying two totems / a stack never arms it — engine side); samples
- * are dropped while the transport is unstable; the consistency signal needs
- * many samples and BOTH low SD and low mean.
+ * Stack carry never arms (handled at the EntityResurrectEvent source), so the
+ * legit "two totems / a stack" case cannot false-positive.
  */
 public final class AutoTotemCheck extends SimCheck {
 
     private static final class S {
         boolean armed;
-        long popConf;            // confirmedTransactions at the pop
-        long popTick;            // engine tick the totem was consumed
-        long lastConsume = Long.MIN_VALUE;
-        final Deque<Long> intervals = new ArrayDeque<>();   // re-equip ticks
+        long popSeq = Long.MIN_VALUE;
+        long popConf;
+        long popNanos;
+        final Deque<Long> intervals = new ArrayDeque<>();
     }
 
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
 
     public AutoTotemCheck(KoalaGuard plugin) {
         super(plugin, "autototem", CheckCategory.COMBAT,
-                "Automated totem re-equip (behavioural)");
+                "Automated totem re-equip (Meteor fingerprint + behavioural)");
     }
 
     @Override
@@ -72,13 +74,12 @@ public final class AutoTotemCheck extends SimCheck {
                     "client brand advertises autototem: " + ctx.data.packetBrand, false);
         }
 
-        // ── arm on a fresh off-hand totem consume ──
-        if (inv.awaitingTotemTransition
-                && inv.totemConsumedTick != s.lastConsume) {
+        // ── arm on a fresh pop (sequence counter — advances even when still) ──
+        if (inv.awaitingTotemTransition && inv.totemPopSeq != s.popSeq) {
             s.armed = true;
-            s.lastConsume = inv.totemConsumedTick;
-            s.popTick = inv.totemConsumedTick;
-            s.popConf = ctx.data.confirmedTransactions;
+            s.popSeq = inv.totemPopSeq;
+            s.popConf = inv.totemPopConf;
+            s.popNanos = inv.totemPopNanos;
             return;
         }
         if (!s.armed) { clean(ctx, 0.05); return; }
@@ -88,34 +89,59 @@ public final class AutoTotemCheck extends SimCheck {
 
         s.armed = false;
         inv.awaitingTotemTransition = false;
-
-        // Drop the sample entirely if the transport was unstable — the tick
-        // clock could be skewed and we never risk a laggy false positive.
         if (ctx.unstableBasic()) { clean(ctx, 0.5); return; }
 
         long interval = Math.max(0, ctx.data.confirmedTransactions - s.popConf);
         s.intervals.addLast(interval);
         while (s.intervals.size() > cfgI("sample-cap", 40)) s.intervals.removeFirst();
 
+        // Scan the packet stream strictly since the pop (wall-clock-nanos
+        // bound — independent of the frozen movement tick).
+        boolean meteorSlot = false, attacked = false, dupHeld = false;
+        int clicks = 0, prevHeld = Integer.MIN_VALUE;
+        long firstClickNs = 0, lastClickNs = 0;
+        for (CapturedPacket p : ctx.state.log.recent(256)) {
+            if (p.recvNanos < s.popNanos) continue;
+            switch (p.kind) {
+                case CLICK_WINDOW -> {
+                    clicks++;
+                    if (firstClickNs == 0) firstClickNs = p.recvNanos;
+                    lastClickNs = p.recvNanos;
+                    if (p.intA == 45 && p.intB == 0) meteorSlot = true;
+                }
+                case INTERACT_ENTITY -> {
+                    if (String.valueOf(p.objA).contains("ATTACK")) attacked = true;
+                }
+                case HELD_ITEM -> {
+                    if (p.intA == prevHeld) dupHeld = true;
+                    prevHeld = p.intA;
+                }
+                default -> { }
+            }
+        }
+        // ≥2 inventory clicks inside ~one tick = pickup+place burst (Meteor).
+        boolean clustered = clicks >= 2
+                && (lastClickNs - firstClickNs) <= cfgL("cluster-window-ns", 60_000_000L);
+
+        int fast = cfgI("fast-ticks", 4);
+        boolean isFast = interval <= fast;
+
         double bad = 0;
         StringBuilder why = new StringBuilder();
 
-        // S1 — BadPacketsC: consecutive identical held-slot packets post-pop.
-        if (duplicateHeldSlotSince(ctx, s.popTick)) {
+        if (meteorSlot && (attacked || isFast)) {           // S0
+            bad += cfgD("meteor-score", 9.0);
+            why.append("meteor slot45/win0 click+combat ");
+        }
+        if (clustered) {                                     // S0b
+            bad += cfgD("cluster-score", 8.0);
+            why.append("clustered ").append(clicks).append(" clicks/tick ");
+        }
+        if (dupHeld) {                                       // S1
             bad += cfgD("badpacket-score", 8.0);
             why.append("dup-held-slot ");
         }
-
-        // S3 — humanly impossible single reaction.
-        int fast = cfgI("fast-ticks", 4);
-        if (interval <= fast) {
-            bad += cfgD("fast-score", 3.0);
-            why.append("fast=").append(interval).append("t ");
-        }
-
-        // S2 — machine consistency across cycles (the strongest signal).
-        int minSamples = cfgI("min-samples", 5);
-        if (s.intervals.size() >= minSamples) {
+        if (s.intervals.size() >= cfgI("min-samples", 5)) {  // S2
             double mean = MathUtil.average(s.intervals);
             double sd = MathUtil.standardDeviation(s.intervals);
             if (sd < cfgD("max-sd-ticks", 1.2) && mean < cfgD("max-mean-ticks", 12.0)) {
@@ -123,6 +149,10 @@ public final class AutoTotemCheck extends SimCheck {
                 why.append(String.format("consistent mean=%.1ft sd=%.2f n=%d ",
                         mean, sd, s.intervals.size()));
             }
+        }
+        if (isFast) {                                        // S3 (supporting)
+            bad += cfgD("fast-score", 3.0);
+            why.append("fast=").append(interval).append("t ");
         }
 
         if (bad > 0) {
@@ -132,24 +162,6 @@ public final class AutoTotemCheck extends SimCheck {
         } else {
             clean(ctx, 2.0);
         }
-    }
-
-    /**
-     * TotemGuard BadPacketsC: a vanilla client never sends two consecutive
-     * HELD_ITEM_CHANGE packets for the same slot. AutoTotem mods that toggle
-     * the hotbar to fetch a totem do. Pure packet sequence — no timing.
-     */
-    private boolean duplicateHeldSlotSince(CheckContext ctx, long sinceTick) {
-        int prevSlot = Integer.MIN_VALUE;
-        List<CapturedPacket> recent = ctx.state.log.recent(96);
-        // recent() is newest-first; walk it oldest-first for chronological order.
-        for (int i = recent.size() - 1; i >= 0; i--) {
-            CapturedPacket p = recent.get(i);
-            if (p.kind != PacketKind.HELD_ITEM || p.tickIndex < sinceTick) continue;
-            if (p.intA == prevSlot) return true;
-            prevSlot = p.intA;
-        }
-        return false;
     }
 
     @Override
