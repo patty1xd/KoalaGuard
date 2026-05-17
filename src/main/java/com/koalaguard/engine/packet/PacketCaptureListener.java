@@ -137,10 +137,15 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
         }
 
         if (type == PacketType.Play.Client.CLICK_WINDOW) {
-            WrapperPlayClientClickWindow w = new WrapperPlayClientClickWindow(event);
             CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.CLICK_WINDOW, nanos);
-            p.intA = w.getSlot();       // 45 = off-hand (Meteor autototem target)
-            p.intB = w.getWindowId();   // 0  = player inventory menu
+            // Decode is best-effort: the cluster / combat-concurrent signals
+            // only need that a window-click occurred, so a wrapper change on a
+            // given MC version can NEVER silence AutoTotem detection.
+            try {
+                WrapperPlayClientClickWindow w = new WrapperPlayClientClickWindow(event);
+                p.intA = w.getSlot();       // 45 = off-hand (Meteor target)
+                p.intB = w.getWindowId();   // 0  = player inventory menu
+            } catch (Throwable ignored) { }
             offer(s, p);
             return;
         }
