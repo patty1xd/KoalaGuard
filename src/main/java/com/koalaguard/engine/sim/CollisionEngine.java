@@ -4,17 +4,19 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.util.BoundingBox;
+import org.bukkit.util.VoxelShape;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Server-authoritative world collision. Reads blocks via Bukkit (MAIN THREAD
- * ONLY) and answers the geometric questions the simulator/checks need:
- * is the box supported, is it intersecting solid geometry (phase), and what is
- * the slipperiness under the feet (ice momentum is modelled, not hard-coded).
+ * Server-authoritative world collision (MAIN THREAD ONLY).
  *
- * Block collision uses {@link Block#getBoundingBox()} / {@link Block#isPassable()}
- * — robust Bukkit API that never throws on modded/odd blocks. We only ever act
- * on PERSISTENT geometric contradictions, so the slab/stairs outer-box
- * approximation cannot produce a false ban.
+ * Uses the PRECISE per-block {@link Block#getCollisionShape()} sub-boxes, not
+ * the coarse {@link Block#getBoundingBox()} outer box. That distinction is the
+ * Phase false-positive fix: a stair's outer box is a full 1×1×1 cube, so a
+ * player standing on the lower step "intersects" it; the real collision shape
+ * is two partial boxes the player legitimately stands on top of, never inside.
  */
 public final class CollisionEngine {
 
@@ -24,65 +26,71 @@ public final class CollisionEngine {
         if (b == null) return false;
         Material m = b.getType();
         if (m.isAir() || b.isLiquid()) return false;
-        if (b.isPassable()) return false;
-        BoundingBox bb = b.getBoundingBox();
-        return bb != null && bb.getVolume() > 0;
+        return !b.isPassable();
     }
 
-    /** A collidable block within 0.001..maxDrop below the player's feet. */
+    /** World-space collision boxes for a block (precise; empty if passable). */
+    private static List<BoundingBox> worldBoxes(World w, int bx, int by, int bz) {
+        Block b = w.getBlockAt(bx, by, bz);
+        if (!collidable(b)) return List.of();
+        List<BoundingBox> out = new ArrayList<>(4);
+        try {
+            VoxelShape shape = b.getCollisionShape();
+            for (BoundingBox bb : shape.getBoundingBoxes()) {
+                out.add(bb.clone().shift(bx, by, bz));   // shape is block-relative
+            }
+        } catch (Throwable ignored) { }
+        if (out.isEmpty()) {
+            BoundingBox bb = b.getBoundingBox();          // robust fallback
+            if (bb != null && bb.getVolume() > 0) out.add(bb);
+        }
+        return out;
+    }
+
+    /** A collidable surface within ~0.5 below the feet (precise top face). */
     public static boolean supported(World w, double x, double y, double z, double height) {
         if (w == null) return true;
-        AABB feet = new AABB(x - 0.3, y - 0.001, z - 0.3, x + 0.3, y, z + 0.3)
-                .expand(0, 0.0, 0);
-        int minX = (int) Math.floor(feet.minX), maxX = (int) Math.floor(feet.maxX);
-        int minZ = (int) Math.floor(feet.minZ), maxZ = (int) Math.floor(feet.maxZ);
-        int by = (int) Math.floor(y - 0.02);
-        for (int bx = minX; bx <= maxX; bx++) {
-            for (int bz = minZ; bz <= maxZ; bz++) {
-                Block b = w.getBlockAt(bx, by, bz);
-                if (!collidable(b)) continue;
-                BoundingBox box = b.getBoundingBox();
-                if (box.getMaxY() >= y - 0.5 && box.getMaxY() <= y + 0.001
-                        && box.getMaxX() > feet.minX && box.getMinX() < feet.maxX
-                        && box.getMaxZ() > feet.minZ && box.getMinZ() < feet.maxZ) {
-                    return true;
+        int minX = (int) Math.floor(x - 0.3), maxX = (int) Math.floor(x + 0.3);
+        int minZ = (int) Math.floor(z - 0.3), maxZ = (int) Math.floor(z + 0.3);
+        for (int by = (int) Math.floor(y - 0.55); by <= (int) Math.floor(y + 0.02); by++) {
+            for (int bx = minX; bx <= maxX; bx++) {
+                for (int bz = minZ; bz <= maxZ; bz++) {
+                    for (BoundingBox box : worldBoxes(w, bx, by, bz)) {
+                        if (box.getMaxY() >= y - 0.501 && box.getMaxY() <= y + 0.02
+                                && box.getMaxX() > x - 0.3 && box.getMinX() < x + 0.3
+                                && box.getMaxZ() > z - 0.3 && box.getMinZ() < z + 0.3) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
         return false;
     }
 
-    /** True if the player's body box overlaps any solid collision box. */
+    /** True only if the player BODY is genuinely embedded in solid geometry. */
     public static boolean insideSolid(World w, double x, double y, double z, double height) {
         if (w == null) return false;
-        AABB body = new AABB(x - 0.299, y + 0.02, z - 0.299,
-                             x + 0.299, y + height - 0.02, z + 0.299);
-        int minX = (int) Math.floor(body.minX), maxX = (int) Math.floor(body.maxX);
-        int minY = (int) Math.floor(body.minY), maxY = (int) Math.floor(body.maxY);
-        int minZ = (int) Math.floor(body.minZ), maxZ = (int) Math.floor(body.maxZ);
+        // Inset hard so merely brushing a wall / standing on a step is not
+        // "inside"; Phase additionally requires this for several ticks.
+        BoundingBox body = new BoundingBox(
+                x - 0.25, y + 0.10, z - 0.25,
+                x + 0.25, y + height - 0.10, z + 0.25);
+        int minX = (int) Math.floor(body.getMinX()), maxX = (int) Math.floor(body.getMaxX());
+        int minY = (int) Math.floor(body.getMinY()), maxY = (int) Math.floor(body.getMaxY());
+        int minZ = (int) Math.floor(body.getMinZ()), maxZ = (int) Math.floor(body.getMaxZ());
         for (int bx = minX; bx <= maxX; bx++) {
             for (int by = minY; by <= maxY; by++) {
                 for (int bz = minZ; bz <= maxZ; bz++) {
-                    Block b = w.getBlockAt(bx, by, bz);
-                    if (!collidable(b)) continue;
-                    var box = b.getBoundingBox();
-                    // Only a (near) FULL cube counts. Slabs, stairs, panes,
-                    // fences, walls, carpets, snow layers, farmland etc. have
-                    // partial collision boxes the player legitimately overlaps
-                    // at the edges — judging those would false-positive Phase
-                    // (which sets the player back), so they are excluded.
-                    boolean fullCube =
-                            (box.getMaxX() - box.getMinX()) >= 0.98 &&
-                            (box.getMaxY() - box.getMinY()) >= 0.98 &&
-                            (box.getMaxZ() - box.getMinZ()) >= 0.98;
-                    if (fullCube && body.intersects(box)) return true;
+                    for (BoundingBox box : worldBoxes(w, bx, by, bz)) {
+                        if (box.overlaps(body)) return true;
+                    }
                 }
             }
         }
         return false;
     }
 
-    /** Vanilla slipperiness of the block the player is standing on. */
     public static double slipperiness(World w, double x, double y, double z) {
         if (w == null) return 0.6;
         Block b = w.getBlockAt((int) Math.floor(x),
@@ -96,7 +104,22 @@ public final class CollisionEngine {
         };
     }
 
-    /** Cheap "is there ground within ~1 block under the feet" (step grace). */
+    /** A solid block pressed against the player's side (Spider needs a wall). */
+    public static boolean touchingWall(World w, double x, double y, double z) {
+        if (w == null) return false;
+        int by0 = (int) Math.floor(y + 0.2), by1 = (int) Math.floor(y + 1.4);
+        double[][] dirs = {{0.35, 0}, {-0.35, 0}, {0, 0.35}, {0, -0.35}};
+        for (double[] d : dirs) {
+            int bx = (int) Math.floor(x + d[0]);
+            int bz = (int) Math.floor(z + d[1]);
+            for (int by = by0; by <= by1; by++) {
+                if (collidable(w.getBlockAt(bx, by, bz))) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Ground within ~1 block under the feet (step / coyote grace). */
     public static boolean nearGround(World w, double x, double y, double z, double height) {
         for (double d = 0.0; d <= 1.0; d += 0.25) {
             if (supported(w, x, y - d, z, height)) return true;
