@@ -47,6 +47,8 @@ public final class PlayerState {
     public float prevYaw, prevPitch;
 
     public int airTicks, groundTicks, sinceGroundTicks;
+    /** Movement frames replayed in the current server tick (Blink burst). */
+    public int framesThisTick;
 
     // ── rotation history (true client aim, tick indexed) ──
     private final float[][] rot = new float[128][2];
