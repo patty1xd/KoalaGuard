@@ -80,6 +80,10 @@ public final class EngineTask extends BukkitRunnable {
             // Per-tick transition / aggregate checks (continuous — even with
             // zero packets this tick).
             if (evaluate && !d.setbackPending) {
+                // Reconstruct any completed totem cycle BEFORE the checks read
+                // it (packet-precise, version-independent).
+                com.koalaguard.engine.totem.TotemCycleProcessor.process(d, s);
+
                 SimResult sim = (s.previous != null && s.current != null)
                         ? PhysicsSimulator.simulate(d, player) : new SimResult();
                 CheckContext ctx = new CheckContext(plugin, d, player, s, sim, s.tick);
