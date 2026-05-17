@@ -170,8 +170,10 @@ checks:
     threshold: 12.0
     min-streak: 4
 
-  # TotemGuard-style behavioural model. Intervals are measured in the
-  # confirmed-transaction tick clock (~1 tick = 50 ms), never wall-clock ms.
+  # Meteor packet fingerprint + TotemGuard behavioural stats. The pop is
+  # driven by EntityResurrectEvent and a sequence counter, so it works while
+  # the player stands perfectly still; intervals use the confirmed-transaction
+  # clock (~1 tick = 50 ms), never wall-clock ms / ping subtraction.
   autototem:
     enabled: true
     max-violations: 8
@@ -180,10 +182,13 @@ checks:
     threshold: 9.0
     min-streak: 2
     brand-score: 12.0          # S4 client brand advertises autototem
+    meteor-score: 9.0          # S0 slot-45/window-0 click while attacking
+    cluster-score: 8.0         # S0b >=2 inventory clicks in one tick
+    cluster-window-ns: 60000000 # 60 ms = one tick
     badpacket-score: 8.0       # S1 consecutive same-slot held-item packets
     fast-ticks: 4              # S3 re-equip this fast = inhuman reaction
     fast-score: 3.0
-    min-samples: 5             # S2 cycles needed before consistency judged
+    min-samples: 5             # S2 cycles before consistency is judged
     sample-cap: 40
     max-sd-ticks: 1.2          # S2 std-dev below this = machine-uniform
     max-mean-ticks: 12.0       # S2 and the mean must also be low
