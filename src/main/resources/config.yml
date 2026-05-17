@@ -19,6 +19,17 @@ alerts:
 punishments:
   broadcast: false
 
+# ── Enforcement (the active response, not just alerts) ───────────
+# Movement cheats are rubber-banded by the setback system. Combat
+# cheats are silently neutralised: after a CONFIRMED, persistent
+# reach/hit violation the player's attack packets are dropped for
+# <combat-cancel-ms>, so their hits stop registering (no damage, no
+# knockback dealt) with no message. Only fires post-confirmation, so
+# a single suspicious hit never cancels a legit fight.
+enforcement:
+  cancel-combat: true
+  combat-cancel-ms: 1500
+
 # ── Anti-false-positive gate ─────────────────────────────────────
 # A confirmed violation is still DROPPED while any of these hold. The
 # engine additionally has its own rolling-median RTT instability gate.
@@ -118,24 +129,24 @@ checks:
     threshold: 9.0
     min-streak: 4
 
+  # Only fires on physically impossible aim (out-of-range pitch, or aim
+  # quantised to a fixed step over a large sample). Normal PvP cannot trip
+  # it — anti-aim is handled by hitvalidation (hit must hit the hitbox).
   rotation:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 30d
-    combat-window-ticks: 50
-    samples: 40
-    min-samples: 26
-    min-active: 16
-    min-entropy: 1.35
-    entropy-scale: 18.0
-    min-gcd: 0.30
-    gcd-score: 5.0
-    snap-mean: 12.0
-    max-pitch-sd: 0.06
-    snaplock-score: 5.0
-    threshold: 16.0
-    min-streak: 5
+    threshold: 14.0
+    min-streak: 6
+    invalid-pitch-score: 8.0
+    combat-window-ticks: 60
+    samples: 60
+    min-active: 45
+    min-gcd: 0.5
+    quantise-epsilon: 0.012
+    min-quantised-fraction: 0.97
+    quantise-score: 6.0
 
   velocity:
     enabled: true
@@ -159,11 +170,21 @@ checks:
     threshold: 12.0
     min-streak: 4
 
+  # TotemGuard-style behavioural model. Intervals are measured in the
+  # confirmed-transaction tick clock (~1 tick = 50 ms), never wall-clock ms.
   autototem:
     enabled: true
     max-violations: 8
     punishment: kick
     ban-duration: 30d
-    score: 6.0
-    threshold: 8.0
+    threshold: 9.0
     min-streak: 2
+    brand-score: 12.0          # S4 client brand advertises autototem
+    badpacket-score: 8.0       # S1 consecutive same-slot held-item packets
+    fast-ticks: 4              # S3 re-equip this fast = inhuman reaction
+    fast-score: 3.0
+    min-samples: 5             # S2 cycles needed before consistency judged
+    sample-cap: 40
+    max-sd-ticks: 1.2          # S2 std-dev below this = machine-uniform
+    max-mean-ticks: 12.0       # S2 and the mean must also be low
+    consistency-score: 9.0
