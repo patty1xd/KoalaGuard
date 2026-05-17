@@ -2,11 +2,15 @@ package com.koalaguard.engine;
 
 import com.koalaguard.KoalaGuard;
 import com.koalaguard.engine.check.SimCheck;
+import com.koalaguard.engine.checks.combat.AimA;
+import com.koalaguard.engine.checks.combat.AimB;
+import com.koalaguard.engine.checks.combat.AimC;
+import com.koalaguard.engine.checks.combat.AimD;
+import com.koalaguard.engine.checks.combat.AimE;
 import com.koalaguard.engine.checks.combat.AutoClickerCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
-import com.koalaguard.engine.checks.combat.KillAuraCheck;
 import com.koalaguard.engine.checks.combat.ReachCheck;
 import com.koalaguard.engine.checks.combat.RotationCheck;
 import com.koalaguard.engine.checks.combat.VelocityCheck;
@@ -83,9 +87,15 @@ public final class EngineManager {
         add(new RotationCheck(plugin));
         add(new VelocityCheck(plugin));
         add(new AutoClickerCheck(plugin));
-        add(new KillAuraCheck(plugin));
         add(new CrystalAuraCheck(plugin));
         add(new CriticalsCheck(plugin));
+
+        // ── Aim family — KillAura split into independent, FP-tuned checks ──
+        add(new AimA(plugin));
+        add(new AimB(plugin));
+        add(new AimC(plugin));
+        add(new AimD(plugin));
+        add(new AimE(plugin));
 
         // ── Inventory: interaction-chain state machines ──
         add(new InventoryChainCheck(plugin));
