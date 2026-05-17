@@ -36,6 +36,19 @@ public final class InventoryState {
     public volatile long totemPopSeq;
     public volatile long totemPopConf;
     public volatile long totemPopNanos;   // clock-independent "since pop" bound
+    public volatile boolean popPending;   // a pop is awaiting its re-equip
+
+    /**
+     * Re-equip bookkeeping driven by Bukkit InventoryClickEvent /
+     * PlayerSwapHandItemsEvent — the server fires these no matter HOW the
+     * cheat moves the totem (raw-packet decoding is unreliable across MC
+     * versions). A legit totem STACK carry fires NEITHER event (the stack just
+     * decrements) so it can never be flagged.
+     */
+    public volatile long reequipSeq;
+    public volatile long reequipConf;
+    public volatile long reequipNanos;
+    public volatile boolean reequipBusy;  // re-equip happened while attacking
 
     // Window lifecycle reconstructed purely from packets.
     public boolean containerOpen;
