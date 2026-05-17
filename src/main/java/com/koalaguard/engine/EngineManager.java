@@ -10,7 +10,14 @@ import com.koalaguard.engine.checks.combat.KillAuraCheck;
 import com.koalaguard.engine.checks.combat.ReachCheck;
 import com.koalaguard.engine.checks.combat.RotationCheck;
 import com.koalaguard.engine.checks.combat.VelocityCheck;
-import com.koalaguard.engine.checks.inventory.AutoTotemCheck;
+import com.koalaguard.engine.checks.inventory.AutoTotemA;
+import com.koalaguard.engine.checks.inventory.AutoTotemB;
+import com.koalaguard.engine.checks.inventory.AutoTotemC;
+import com.koalaguard.engine.checks.inventory.AutoTotemD;
+import com.koalaguard.engine.checks.inventory.AutoTotemE;
+import com.koalaguard.engine.checks.inventory.AutoTotemF;
+import com.koalaguard.engine.checks.inventory.BadPacketsBrand;
+import com.koalaguard.engine.checks.inventory.BadPacketsDuplicate;
 import com.koalaguard.engine.checks.inventory.InventoryChainCheck;
 import com.koalaguard.engine.checks.movement.AirJumpCheck;
 import com.koalaguard.engine.checks.movement.AntiVoidCheck;
@@ -82,7 +89,17 @@ public final class EngineManager {
 
         // ── Inventory: interaction-chain state machines ──
         add(new InventoryChainCheck(plugin));
-        add(new AutoTotemCheck(plugin));
+
+        // ── AutoTotem family (TotemGuard model) — every type is its OWN
+        //    independent check reading the shared packet-precise totem cycle ──
+        add(new BadPacketsBrand(plugin));
+        add(new BadPacketsDuplicate(plugin));
+        add(new AutoTotemA(plugin));
+        add(new AutoTotemB(plugin));
+        add(new AutoTotemC(plugin));
+        add(new AutoTotemD(plugin));
+        add(new AutoTotemE(plugin));
+        add(new AutoTotemF(plugin));
 
         // ── Player / World ──
         add(new InventoryActionCheck(plugin));
