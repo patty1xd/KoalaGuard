@@ -5,21 +5,25 @@ import com.koalaguard.check.CheckCategory;
 import com.koalaguard.engine.check.CheckContext;
 import com.koalaguard.engine.check.SimCheck;
 import com.koalaguard.engine.state.PositionFrame;
+import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.enchantments.Enchantment;
 
 /**
- * NoSlow. While genuinely using an item (eating, drinking, blocking, drawing a
- * bow/crossbow) vanilla clamps movement to ~20% speed.
+ * NoSlow — the real meaning: NOT being slowed by a block that must slow you.
  *
- * The use-state is taken from the SERVER ({@code isHandRaised()} == Mojang's
- * "isUsingItem"), NOT the spoofable, sticky USE_ITEM packet — a single
- * right-click to place a block / open a door / throw a pearl used to latch the
- * old flag on forever and false-positive normal sprinting. Plus ground +
- * normal-friction + no-knockback gates so only input speed is measured.
+ * Vanilla all but freezes you in a COBWEB (effective horizontal speed
+ * ≲0.05/tick) and clamps SOUL SAND to ~40% speed. A NoSlow/Cobweb hack moves
+ * through them at normal speed — a huge, unambiguous divergence, so this is
+ * false-positive proof (a legit player in a web is nearly stationary).
+ *
+ * The old item-use logic was removed: it false-positived eating-while-walking
+ * and overlaps the prediction envelope anyway.
  */
 public final class NoSlowCheck extends SimCheck {
 
     public NoSlowCheck(KoalaGuard plugin) {
-        super(plugin, "noslow", CheckCategory.MOVEMENT, "Full speed while using an item");
+        super(plugin, "noslow", CheckCategory.MOVEMENT, "Not slowed by cobweb / soul sand");
     }
 
     @Override
@@ -29,33 +33,52 @@ public final class NoSlowCheck extends SimCheck {
     public void onTick(CheckContext ctx) {
         PositionFrame f = ctx.state.current;
         if (f == null) return;
-
-        boolean usingItem;
-        try { usingItem = ctx.player.isHandRaised(); }
-        catch (Throwable t) { usingItem = false; }
-
-        if (!usingItem || ctx.unstable()
-                || ctx.state.exVehicle || ctx.state.exGliding || ctx.state.exRiptide
-                || ctx.state.exLiquid || ctx.state.exWeb || ctx.state.exClimbing) {
+        if (ctx.unstable() || ctx.state.exVehicle || ctx.state.exFlying
+                || ctx.state.exGliding || ctx.state.exRiptide || ctx.state.exLiquid) {
             clean(ctx, 1.0);
             return;
         }
-        if (!f.simGround || f.groundSlipperiness > 0.61) { clean(ctx, 1.0); return; }
         long now = System.currentTimeMillis();
-        if (now - ctx.data.lastVelocityMs < 1200 || now - ctx.data.lastDamageMs < 800
-                || now - ctx.data.lastTeleportMs < 1500
-                || ctx.state.tick - ctx.state.lastSpecialBlockTick < 12) {
+        if (now - ctx.data.lastVelocityMs < 1500 || now - ctx.data.lastDamageMs < 1000
+                || now - ctx.data.lastTeleportMs < 1500) {
             return;
         }
 
-        double max = cfgD("max-use-speed", 0.135);   // vanilla use-speed ≈ 0.054
+        World w = ctx.player.getWorld();
+        int bx = (int) Math.floor(f.x), bz = (int) Math.floor(f.z);
+        Material feet = w.getBlockAt(bx, (int) Math.floor(f.y + 0.1), bz).getType();
+        Material legs = w.getBlockAt(bx, (int) Math.floor(f.y + 1.0), bz).getType();
+        Material below = w.getBlockAt(bx, (int) Math.floor(f.y - 0.1), bz).getType();
         double h = f.horizontalSpeed();
-        if (h > max) {
-            diverge(ctx, (h - max) * cfgD("score-scale", 50.0),
-                    cfgD("threshold", 10.0), cfgI("min-streak", 6),
-                    String.format("speed %.3f while using item (max %.2f)", h, max), true);
-        } else {
+
+        if (feet == Material.COBWEB || legs == Material.COBWEB) {
+            double max = cfgD("max-web-speed", 0.12);   // legit web ≈ 0.05
+            if (h > max) {
+                diverge(ctx, (h - max) * cfgD("score-scale", 50.0),
+                        cfgD("threshold", 9.0), cfgI("min-streak", 4),
+                        String.format("cobweb speed %.3f > %.2f", h, max), true);
+                return;
+            }
             clean(ctx, 1.5);
+            return;
         }
+
+        if (below == Material.SOUL_SAND && !hasSoulSpeed(ctx)) {
+            double max = cfgD("max-soulsand-speed", 0.16);
+            if (h > max) {
+                diverge(ctx, (h - max) * cfgD("score-scale", 50.0),
+                        cfgD("threshold", 9.0), cfgI("min-streak", 6),
+                        String.format("soul sand speed %.3f > %.2f", h, max), true);
+                return;
+            }
+        }
+        clean(ctx, 1.0);
+    }
+
+    private boolean hasSoulSpeed(CheckContext ctx) {
+        try {
+            var boots = ctx.player.getInventory().getBoots();
+            return boots != null && boots.getEnchantmentLevel(Enchantment.SOUL_SPEED) > 0;
+        } catch (Throwable t) { return false; }
     }
 }
