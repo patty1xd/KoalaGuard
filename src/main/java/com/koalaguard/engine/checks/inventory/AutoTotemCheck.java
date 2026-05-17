@@ -4,42 +4,58 @@ import com.koalaguard.KoalaGuard;
 import com.koalaguard.check.CheckCategory;
 import com.koalaguard.engine.check.CheckContext;
 import com.koalaguard.engine.check.SimCheck;
+import com.koalaguard.engine.packet.CapturedPacket;
+import com.koalaguard.engine.packet.PacketKind;
 import com.koalaguard.engine.state.InventoryState;
 import com.koalaguard.util.MathUtil;
+import org.bukkit.Material;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * AutoTotem — driven by SERVER-side Bukkit events, not raw packet decoding.
+ * AutoTotem — REBUILT to stop depending on Bukkit {@code InventoryClickEvent}.
  *
- * The server fires {@code EntityResurrectEvent} the instant a totem pops, and
- * {@code InventoryClickEvent}/{@code PlayerSwapHandItemsEvent} the instant the
- * totem is moved back to the off hand — no matter how the cheat crafted the
- * packet, and even when the player is perfectly still. {@link com.koalaguard
- * .listener.BukkitStateListener} records the pop and the re-equip; this check
- * just judges the relationship (TotemGuard methodology, on the
- * confirmed-transaction tick clock — no wall-clock ms, no ping subtraction):
+ * The old version only ever advanced when {@code InventoryClickEvent} /
+ * {@code PlayerSwapHandItemsEvent} fired for the re-equip. A packet-level
+ * inventory move (window 0, screen never opened — exactly what fast autototems
+ * do) frequently does NOT raise those events, so {@code reequipSeq} never moved
+ * and the check {@code clean()}ed forever. That is why it never detected.
  *
- *  S0  re-equip happened while the player was ATTACKING — the inventory GUI
- *      cannot be open while you swing at an entity → impossible by hand.
- *  S1  re-equip faster than a human can notice+act (few transaction ticks).
- *  S2  machine-consistent re-equip interval across many pops (low sd + mean).
- *  S3  brand / plugin-message advertises an autototem mod.
+ * The pop is still taken from {@code EntityResurrectEvent} (the server applies
+ * it — 100% reliable, fires while perfectly still). The RE-EQUIP is now read
+ * from the server-authoritative inventory mirror (off-hand becomes a totem
+ * again), which is version-independent and impossible for a cheat to hide, and
+ * corroborated from the raw packet stream.
  *
- * FP-proof: a legit totem STACK in the off hand fires NEITHER inventory event
- * (the stack just decrements) → reequipSeq never advances → nothing is judged.
- * A manual re-equip fires the event but is slow, variable, and not done while
- * attacking → no signal trips.
+ *  S0  Packet-move re-equip — a window-click / off-hand-swap packet moved the
+ *      totem while the player was simultaneously rotating or attacking. The
+ *      vanilla client sends neither while an inventory SCREEN is open, so the
+ *      screen was never open ⇒ the move was synthetic. Near-certain.
+ *  S1  Instant / fast re-equip — the off hand held a totem again within a tiny
+ *      number of confirmed-transaction ticks of the pop.
+ *  S2  Machine consistency — re-equip interval has low variance over a sample.
+ *  S3  Client brand advertises an autototem mod.
+ *
+ * FP-proof: a legit totem STACK in the off hand just DECREMENTS on a pop — the
+ * off hand never stops being a totem, so the false→true transition never
+ * happens AND no inventory-move packet is sent ⇒ nothing is ever judged. A
+ * manual re-equip via the real inventory screen is slow, variable, and the
+ * client sends no rotation/attack while that screen is open ⇒ no signal trips.
  */
 public final class AutoTotemCheck extends SimCheck {
 
     private static final class S {
-        long lastReequipSeq = Long.MIN_VALUE;
-        final Deque<Long> intervals = new ArrayDeque<>();   // transaction ticks
+        long handledPopSeq = Long.MIN_VALUE;
+        boolean awaiting;
+        long popConfAt;
+        long popTickAt;
+        boolean wasTotemOff;
+        final Deque<Long> intervals = new ArrayDeque<>();
     }
 
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
@@ -54,33 +70,92 @@ public final class AutoTotemCheck extends SimCheck {
         UUID id = ctx.data.getUuid();
         S s = state.computeIfAbsent(id, k -> new S());
 
-        if (ctx.data.flagBadBrand) {                                       // S3
+        boolean totemOff = inv.offHand == Material.TOTEM_OF_UNDYING;
+
+        // S3 — brand (independent of any cycle).
+        if (ctx.data.flagBadBrand) {
             diverge(ctx, cfgD("brand-score", 12.0), cfgD("threshold", 9.0), 1,
                     "client brand advertises autototem: " + ctx.data.packetBrand, false);
         }
 
-        if (inv.reequipSeq == s.lastReequipSeq) { clean(ctx, 0.05); return; }
-        s.lastReequipSeq = inv.reequipSeq;                                 // new cycle
+        // A fresh pop began a new re-equip cycle.
+        if (inv.totemPopSeq != s.handledPopSeq) {
+            s.handledPopSeq = inv.totemPopSeq;
+            s.awaiting = true;
+            s.popConfAt = inv.totemPopConf;
+            s.popTickAt = inv.totemConsumedTick;
+            // If the off hand is ALREADY a totem on the same mirror tick the pop
+            // fired, the consume→refill happened sub-tick (the mirror never saw
+            // the dip). That is the strongest "instant" case — handled below
+            // via the packet corroboration so a stack carry stays FP-safe.
+        }
 
-        long interval = Math.max(0, inv.reequipConf - inv.totemPopConf);
+        boolean reequipObserved = false;
+        if (s.awaiting && totemOff && !s.wasTotemOff) {
+            reequipObserved = true;                       // mirror saw the dip→totem
+        } else if (s.awaiting && totemOff && s.wasTotemOff
+                && ctx.data.confirmedTransactions - s.popConfAt <= cfgI("instant-ticks", 1)) {
+            reequipObserved = true;                       // sub-tick instant refill
+        }
+
+        // Abandon a pop whose re-equip never came (legit single-totem death).
+        if (s.awaiting && ctx.data.confirmedTransactions - s.popConfAt > cfgI("await-timeout-ticks", 200)) {
+            s.awaiting = false;
+        }
+
+        if (!reequipObserved) {
+            s.wasTotemOff = totemOff;
+            if (!s.awaiting) clean(ctx, 0.05);
+            return;
+        }
+        s.awaiting = false;
+        s.wasTotemOff = totemOff;
+
+        long interval = Math.max(0, ctx.data.confirmedTransactions - s.popConfAt);
         s.intervals.addLast(interval);
         while (s.intervals.size() > cfgI("sample-cap", 30)) s.intervals.removeFirst();
+
+        // Did a synthetic inventory move (click/offhand-swap) occur between the
+        // pop and now WHILE the player was rotating or attacking? The vanilla
+        // client sends no rotation/attack while an inventory SCREEN is open, so
+        // an interleaved move proves the screen was never open.
+        boolean movePacket = false;
+        boolean busyMove = false;
+        List<CapturedPacket> log = ctx.state.log.recent(160);
+        for (CapturedPacket p : log) {
+            if (p.tickIndex < s.popTickAt - 1) break;     // log is tick-ordered
+            boolean isMove = (p.kind == PacketKind.CLICK_WINDOW)
+                    || (p.kind == PacketKind.DIGGING
+                        && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA));
+            if (!isMove) continue;
+            movePacket = true;
+            for (CapturedPacket q : log) {
+                if (Math.abs(q.tickIndex - p.tickIndex) > 1) continue;
+                if ((q.kind == PacketKind.MOVEMENT && q.hasRot)
+                        || (q.kind == PacketKind.INTERACT_ENTITY
+                            && String.valueOf(q.objA).contains("ATTACK"))) {
+                    busyMove = true;
+                    break;
+                }
+            }
+            if (busyMove) break;
+        }
 
         double bad = 0;
         StringBuilder why = new StringBuilder();
 
-        if (inv.reequipBusy) {                                             // S0
-            bad += cfgD("combat-score", 9.0);
-            why.append("re-equip while attacking ");
+        if (busyMove) {                                                   // S0
+            bad += cfgD("packet-score", 10.0);
+            why.append("packet-move re-equip while moving/attacking ");
         }
-        if (interval <= cfgI("fast-ticks", 3)) {                           // S1
-            bad += cfgD("fast-score", 4.0);
+        if (interval <= cfgI("fast-ticks", 3) && movePacket) {            // S1
+            bad += cfgD("fast-score", 5.0);
             why.append("fast=").append(interval).append("t ");
         }
-        if (s.intervals.size() >= cfgI("min-samples", 5)) {                // S2
+        if (s.intervals.size() >= cfgI("min-samples", 5) && movePacket) { // S2
             double mean = MathUtil.average(s.intervals);
             double sd = MathUtil.standardDeviation(s.intervals);
-            if (sd < cfgD("max-sd-ticks", 1.5) && mean < cfgD("max-mean-ticks", 14.0)) {
+            if (sd < cfgD("max-sd-ticks", 1.6) && mean < cfgD("max-mean-ticks", 16.0)) {
                 bad += cfgD("consistency-score", 9.0);
                 why.append(String.format("consistent mean=%.1ft sd=%.2f n=%d ",
                         mean, sd, s.intervals.size()));
@@ -89,15 +164,15 @@ public final class AutoTotemCheck extends SimCheck {
 
         if (debug()) {
             plugin.getLogger().info("[autototem] " + ctx.player.getName()
-                    + " cycle interval=" + interval + "t busy=" + inv.reequipBusy
-                    + " n=" + s.intervals.size() + " bad=" + bad);
+                    + " interval=" + interval + "t movePkt=" + movePacket
+                    + " busy=" + busyMove + " n=" + s.intervals.size() + " bad=" + bad);
         }
 
         if (bad > 0) {
             diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 2),
                     "autototem :: " + why.toString().trim(), false);
         } else {
-            clean(ctx, 2.0);
+            clean(ctx, 1.5);
         }
     }
 
