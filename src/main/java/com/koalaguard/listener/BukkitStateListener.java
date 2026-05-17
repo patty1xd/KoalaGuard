@@ -99,18 +99,14 @@ public final class BukkitStateListener implements Listener {
         if (!(event.getEntity() instanceof Player p)) return;
         PlayerData d = plugin.getDataManager().get(p);
         if (d == null) return;
-        // EXACT pop moment (fires before any refill, so an instant autototem
-        // cannot hide the cycle). seq is a pure counter — advances even when
-        // the player is standing perfectly still; popConf snapshots the
-        // always-advancing transaction clock for a movement-independent
-        // re-equip interval.
-        // Legit "carrying a STACK of totems in the off hand" is unmeasurable
-        // and must never arm a cycle (the user's explicit two-totem concern):
-        // a stack just decrements, the off hand stays a totem, no move packet
-        // ever occurs. Only a single off-hand totem (the autototem vector) arms.
-        org.bukkit.inventory.ItemStack off = p.getInventory().getItemInOffHand();
-        if (off.getType() == Material.TOTEM_OF_UNDYING && off.getAmount() >= 2) return;
-
+        // EXACT pop moment — fires before any refill, so an instant autototem
+        // cannot hide it. seq is a pure counter (advances even while perfectly
+        // still); popConf/nanos give a movement-independent "since pop" bound.
+        // NOTE: no stack guard. A legit player carrying a totem STACK produces
+        // ZERO click packets (the stack just decrements), so the packet-
+        // behaviour signals below never fire for them — that, not skipping the
+        // cycle, is what makes the two-totem case false-positive proof. The old
+        // amount>=2 skip is exactly why stack-based autototems were invisible.
         var inv = d.engine.inv;
         inv.totemConsumedTick = d.engine.tick;
         inv.totemPopConf = d.confirmedTransactions;
