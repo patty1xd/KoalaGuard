@@ -219,23 +219,13 @@ public final class EngineTask extends BukkitRunnable {
         int newMainCount = pi.getItemInMainHand().getAmount();
         Material newCursor = player.getItemOnCursor().getType();
 
-        boolean offWasTotem = inv.offHand == Material.TOTEM_OF_UNDYING;
-
         if (newMain != inv.mainHand) inv.mainHandChangedTick = s.tick;
         if (newOff  != inv.offHand)  inv.offHandChangedTick  = s.tick;
 
-        // AutoTotem is purely an OFF-HAND re-equip vector, so we only arm on a
-        // true off-hand totem CONSUME (TOTEM -> non-totem). Main-hand totems and
-        // off-hand stack decrements (TOTEM -> TOTEM, count--) are NOT a cycle —
-        // this is what makes "carrying two totems / a stack" impossible to FP.
-        boolean offConsumed = offWasTotem && newOff != Material.TOTEM_OF_UNDYING;
-        boolean offDecremented = offWasTotem && newOff == Material.TOTEM_OF_UNDYING
-                && newOffCount < inv.offHandCount;
-
-        if (offConsumed && !offDecremented) {
-            inv.totemConsumedTick = s.tick;
-            inv.awaitingTotemTransition = true;
-        }
+        // NOTE: the totem pop is NOT detected here. A once-per-tick mirror
+        // misses a sub-tick consume→refill (exactly what a fast autototem
+        // does), so the pop is driven by EntityResurrectEvent in
+        // BukkitStateListener instead. This method only mirrors hand state.
 
         inv.mainHand = newMain;
         inv.offHand = newOff;
