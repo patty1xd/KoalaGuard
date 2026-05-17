@@ -49,8 +49,8 @@ public abstract class SimCheck extends Check {
      *
      * @param setback also rubber-band the player to the last sim-valid spot.
      */
-    protected void diverge(CheckContext ctx, double amount, double threshold,
-                           int minStreak, String detail, boolean setback) {
+    protected boolean diverge(CheckContext ctx, double amount, double threshold,
+                              int minStreak, String detail, boolean setback) {
         ViolationScore vs = score(ctx);
         vs.add(amount);
         if (debug()) {
@@ -65,7 +65,21 @@ public abstract class SimCheck extends Check {
             // movement damage/velocity grace.
             if (setback) failResolvedAndSetback(ctx.data, ctx.player, detail);
             else         failResolved(ctx.data, ctx.player, detail);
+            return true;
         }
+        return false;
+    }
+
+    /**
+     * Silent combat cancellation — the combat analog of a movement setback.
+     * After a CONFIRMED persistent combat violation the netty layer drops this
+     * player's attack packets for a short window, so the cheater's hits stop
+     * registering (no damage, no knockback dealt) without any message.
+     */
+    protected void armCombatCancel(CheckContext ctx) {
+        if (!ctx.plugin.getConfig().getBoolean("enforcement.cancel-combat", true)) return;
+        long ms = ctx.plugin.getConfig().getLong("enforcement.combat-cancel-ms", 1500L);
+        ctx.data.combatCancelUntilMs = System.currentTimeMillis() + ms;
     }
 
     /** A clean tick — bleed this check's score. */
