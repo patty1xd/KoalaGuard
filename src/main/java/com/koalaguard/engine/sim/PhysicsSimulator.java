@@ -100,7 +100,7 @@ public final class PhysicsSimulator {
         // Forces the simulator does not model precisely → mark unreliable so
         // the divergence checks skip rather than risk a false positive.
         if (s.exVehicle || s.exGliding || s.exClimbing || s.exLiquid
-                || s.exRiptide || s.exLevitation) {
+                || s.exRiptide || s.exLevitation || s.exWeb) {
             r.horizontalReliable = false;
             r.verticalReliable = false;
         }
