@@ -39,12 +39,27 @@ public final class TotemCycleProcessor {
     public static void process(PlayerData d, PlayerState s) {
         InventoryState inv = s.inv;
 
-        // A fresh pop opens a new cycle.
+        // A fresh pop opens a new cycle (strongest trigger — takes priority).
         if (inv.totemPopSeq != inv.lastProcessedPopSeq) {
             inv.lastProcessedPopSeq = inv.totemPopSeq;
+            // A pop supersedes any pending vuln cycle (same physical event).
+            inv.lastProcessedVulnSeq = inv.vulnSeq;
             inv.cycleActive   = true;
             inv.cyclePopNanos = inv.totemPopNanos;
             inv.cyclePopTick  = inv.totemConsumedTick;
+        }
+
+        // FIRST-totem trigger: damaged while the off hand had no totem and no
+        // cycle is already running. Reconstructed into the SAME cycle model,
+        // so AutoTotemA–F judge it identically. FP-proof for the same reason:
+        // no inventory packet ⇒ no burst ⇒ no cycle is ever built.
+        if (!inv.cycleActive && inv.vulnSeq != inv.lastProcessedVulnSeq) {
+            inv.lastProcessedVulnSeq = inv.vulnSeq;
+            if (System.nanoTime() - inv.vulnNanos <= ABANDON_NS) {
+                inv.cycleActive   = true;
+                inv.cyclePopNanos = inv.vulnNanos;
+                inv.cyclePopTick  = inv.vulnTick;
+            }
         }
         if (!inv.cycleActive) return;
 
