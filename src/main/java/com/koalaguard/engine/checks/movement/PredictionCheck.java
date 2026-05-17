@@ -80,8 +80,14 @@ public final class PredictionCheck extends SimCheck {
     }
 
     private boolean exempt(PlayerState s) {
+        // Cobweb/powder-snow/berry/honey/scaffolding clamp velocity in ways
+        // the simulator doesn't model — exempt while inside AND for a short
+        // grace after leaving (residual reduced motion + block-edge slack).
+        boolean webGrace = s.tick - s.lastSpecialBlockTick
+                < cfgI("special-block-grace-ticks", 12);
         return s.exFlying || s.exVehicle || s.exGliding || s.exClimbing
-                || s.exLiquid || s.exRiptide || s.exLevitation || s.exSlowFalling;
+                || s.exLiquid || s.exRiptide || s.exLevitation || s.exSlowFalling
+                || s.exWeb || webGrace;
     }
 
     /** External vertical forces the simulator does not model precisely. */
