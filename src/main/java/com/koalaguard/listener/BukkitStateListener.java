@@ -10,7 +10,10 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.event.inventory.ClickType;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.*;
+import org.bukkit.inventory.ItemStack;
 
 /**
  * The ONLY Bukkit-event surface left. It does no detection — it just owns the
@@ -113,6 +116,59 @@ public final class BukkitStateListener implements Listener {
         inv.totemPopNanos = System.nanoTime();
         inv.totemPopSeq++;
         inv.awaitingTotemTransition = true;
+        inv.popPending = true;
+    }
+
+    /**
+     * The server fires this whenever the autototem's ClickSlot is processed —
+     * regardless of how the cheat crafted the packet. We record a re-equip
+     * only when a totem actually goes to the off hand AND a pop is pending, so
+     * a legit stack carry (no click at all) is impossible to flag.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player p)) return;
+        PlayerData d = plugin.getDataManager().get(p);
+        if (d == null) return;
+        var inv = d.engine.inv;
+        if (!inv.popPending) return;
+
+        boolean totemToOffhand = false;
+        // Direct place into the off-hand slot (Meteor: pickup then click 45).
+        if (event.getRawSlot() == 45) {
+            ItemStack c = event.getCursor();
+            ItemStack cur = event.getCurrentItem();
+            if ((c != null && c.getType() == Material.TOTEM_OF_UNDYING)
+                    || (cur != null && cur.getType() == Material.TOTEM_OF_UNDYING)) {
+                totemToOffhand = true;
+            }
+        }
+        // Hotbar→offhand swap (F) issued from inside the inventory.
+        if (event.getClick() == ClickType.SWAP_OFFHAND) {
+            ItemStack cur = event.getCurrentItem();
+            if (cur != null && cur.getType() == Material.TOTEM_OF_UNDYING) totemToOffhand = true;
+        }
+        if (totemToOffhand) recordReequip(d);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSwapHands(PlayerSwapHandItemsEvent event) {
+        PlayerData d = plugin.getDataManager().get(event.getPlayer());
+        if (d == null) return;
+        var inv = d.engine.inv;
+        if (!inv.popPending) return;
+        ItemStack off = event.getOffHandItem();
+        if (off != null && off.getType() == Material.TOTEM_OF_UNDYING) recordReequip(d);
+    }
+
+    private void recordReequip(PlayerData d) {
+        var inv = d.engine.inv;
+        inv.reequipConf = d.confirmedTransactions;
+        inv.reequipNanos = System.nanoTime();
+        long sinceAtkMs = (System.nanoTime() - d.engine.combat.lastAttackNanos) / 1_000_000L;
+        inv.reequipBusy = sinceAtkMs >= 0 && sinceAtkMs < 1500;   // GUI cannot be open while attacking
+        inv.reequipSeq++;
+        inv.popPending = false;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
