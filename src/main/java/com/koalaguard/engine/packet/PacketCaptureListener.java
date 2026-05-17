@@ -75,7 +75,13 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.INTERACT_ENTITY, nanos);
             p.intA = w.getEntityId();
             p.objA = w.getAction();   // InteractAction enum
-            offer(s, p);
+            // Silent combat cancellation: a confirmed persistent combat
+            // violation drops the attack so it never deals damage/knockback.
+            if (w.getAction() == WrapperPlayClientInteractEntity.InteractAction.ATTACK
+                    && System.currentTimeMillis() < d.combatCancelUntilMs) {
+                event.setCancelled(true);
+            }
+            offer(s, p);          // still recorded so detection keeps running
             return;
         }
 
