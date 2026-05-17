@@ -6,6 +6,7 @@ import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.DiggingAction;
 import com.github.retrooper.packetevents.protocol.player.User;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientClickWindow;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientHeldItemChange;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
@@ -136,10 +137,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
         }
 
         if (type == PacketType.Play.Client.CLICK_WINDOW) {
-            // The chain validators only need that a window-click occurred in
-            // the stream — the slot/window decode is intentionally omitted to
-            // stay version-robust across PacketEvents wrapper changes.
-            offer(s, new CapturedPacket(seq.getAndIncrement(), PacketKind.CLICK_WINDOW, nanos));
+            WrapperPlayClientClickWindow w = new WrapperPlayClientClickWindow(event);
+            CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.CLICK_WINDOW, nanos);
+            p.intA = w.getSlot();       // 45 = off-hand (Meteor autototem target)
+            p.intB = w.getWindowId();   // 0  = player inventory menu
+            offer(s, p);
             return;
         }
 
