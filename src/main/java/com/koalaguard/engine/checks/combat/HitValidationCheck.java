@@ -73,8 +73,10 @@ public final class HitValidationCheck extends SimCheck {
         }
 
         if (bad > 0) {
-            diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 4),
-                    "invalid hit: " + why.toString().trim(), false);
+            if (diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 4),
+                    "invalid hit: " + why.toString().trim(), false)) {
+                armCombatCancel(ctx);
+            }
         } else {
             clean(ctx, 1.5);
         }

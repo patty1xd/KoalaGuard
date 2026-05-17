@@ -51,10 +51,12 @@ public final class ReachCheck extends SimCheck {
         double limit = base + tol;
 
         if (dist > limit) {
-            diverge(ctx, (dist - limit) * cfgD("score-scale", 18.0),
+            if (diverge(ctx, (dist - limit) * cfgD("score-scale", 18.0),
                     cfgD("threshold", 9.0), cfgI("min-streak", 3),
                     String.format("reach %.3f > %.2f (eye reconstructed @tick %d)",
-                            dist, limit, atk), false);
+                            dist, limit, atk), false)) {
+                armCombatCancel(ctx);
+            }
         } else {
             clean(ctx, 1.5);
         }
