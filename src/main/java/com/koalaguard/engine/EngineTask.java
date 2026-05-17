@@ -61,6 +61,7 @@ public final class EngineTask extends BukkitRunnable {
 
             boolean evaluate = !s.exSpectator && !s.exDead;
 
+            s.framesThisTick = 0;
             int processed = 0;
             CapturedPacket p;
             while ((p = s.intake.poll()) != null) {
@@ -138,6 +139,7 @@ public final class EngineTask extends BukkitRunnable {
         boolean ground = f.simGround || (p.onGround && near);
 
         s.pushFrame(f);
+        s.framesThisTick++;
         s.pushRotation(yaw, pitch);
 
         if (ground) { s.groundTicks++; s.airTicks = 0; s.sinceGroundTicks = 0; }
