@@ -74,6 +74,9 @@ checks:
     threshold: 8.0
     min-streak: 6
     confirm-cooldown-ticks: 20
+    # Frame-accurate cobweb/powder-snow/etc. exempt + residual-slowdown grace
+    # (fixes the FP when knocked into a web mid-fight).
+    special-block-grace-ticks: 25
 
   phase:
     enabled: true
@@ -274,16 +277,29 @@ checks:
   # Disabled by default — proper elytra detection needs full glide physics.
   elytrafly:    { enabled: false, max-violations: 10, punishment: kick, ban-duration: 14d, min-climb-dy: 0.15, rocket-window-ms: 3000, score: 3.0, threshold: 12.0, min-streak: 25 }
 
-  # ── Additional combat checks ──
-  # Rotation-history driven so it evaluates WHILE STANDING STILL (rotation-only
-  # packets create no position frame — using them was why it never detected).
-  killaura:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: permanent, rot-samples: 40, multi-window-ns: 800000000, combat-window-ns: 1500000000, max-targets: 3, multi-score: 5.0, sample-cap: 30, min-samples: 14, max-mean-deg: 3.0, max-sd-deg: 1.4, aim-score: 7.0, wall-score: 8.0, aim-slack-deg: 12.0, noaim-scale: 0.25, noaim-max: 9.0, snap-min-deg: 30.0, snap-calm-deg: 4.0, snap-score: 6.0, threshold: 10.0, min-streak: 3 }
+  # ══ Aim family — KillAura split into independent, FP-tuned checks ═
+  # Each is ONE signal in its OWN file/buffer/alert. The old monolithic
+  # killaura false-flagged because a moderate aim cone is wrecked by victim-
+  # position desync (~15-25°). These either use desync-proof margins (aima),
+  # need no victim position (aimd), or are conservative & off by default (aime).
+  # aimA — hit far outside field of view (no-rotate / rage / backtrack aura).
+  aima:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, max-fov-deg: 80.0, score: 6.0, threshold: 8.0, min-streak: 3 }
+  # aimB — attack through a solid block.
+  aimb:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: 30d, min-dist: 1.6, score: 5.0, threshold: 9.0, min-streak: 3 }
+  # aimC — multi-target kill-aura.
+  aimc:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: 30d, window-ns: 500000000, max-targets: 3, score: 5.0, threshold: 9.0, min-streak: 2 }
+  # aimD — snap onto target then snap back (silent / backtrack aura).
+  aimd:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, return-window-ticks: 4, snap-min-deg: 22.0, lock-cone-deg: 7.0, return-eps-deg: 9.0, score: 7.0, threshold: 9.0, min-streak: 3 }
+  # aimE — machine-perfect aim lock. Desync-sensitive ⇒ OFF by default.
+  aime:  { enabled: false, max-violations: 10, punishment: kick, ban-duration: 30d, sample-cap: 40, min-samples: 25, max-mean-deg: 2.0, max-sd-deg: 1.0, score: 7.0, threshold: 10.0, min-streak: 2 }
   crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, score-scale: 4.0, threshold: 9.0, min-streak: 3 }
   criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, score: 4.0, threshold: 10.0, min-streak: 5 }
 
   # ── Player / World ──
   inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
-  offhandcrash: { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, window-ns: 80000000, max-swaps-per-tick: 3, score-scale: 5.0, threshold: 9.0, min-streak: 2 }
+  # Counts swaps bound to the SAME reconstructed tick (vanilla sends <=1/tick,
+  # so mashing F can never trip it — only an injected flood can).
+  offhandcrash: { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-swaps-per-tick: 3, score-scale: 5.0, threshold: 9.0, min-streak: 2 }
   multiplace:   { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, window-ns: 70000000, max-places-per-tick: 3, score-scale: 4.0, threshold: 10.0, min-streak: 2 }
   # Time-aligned to the EXACT place tick + real clicked FACE (not the loose
   # live-eye/block-centre the old version used).
