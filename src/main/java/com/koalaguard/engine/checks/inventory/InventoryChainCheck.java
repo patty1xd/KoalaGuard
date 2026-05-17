@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Deliberately scoped to be false-positive proof:
  *  • only APPEARANCE (→ real item) is judged — item DISappearance (consume /
  *    break / clear) is a legitimate server-side mutation and is never flagged;
- *  • the totem is left to {@link AutoTotemCheck} (modular separation);
+ *  • the totem is left to the independent AutoTotem* checks (modular);
  *  • the very first observed inventory state is a baseline, never judged;
  *  • main-hand transitions are intentionally NOT validated here — they have
  *    too many legitimate server-side causes (buckets, crossbows, food, tool
@@ -60,7 +60,7 @@ public final class InventoryChainCheck extends SimCheck {
         Material now = inv.offHand;
         // DISappearance / clear → legitimate server mutation, never flagged.
         if (now == Material.AIR) { clean(ctx, 1.0); return; }
-        // Totem cycle is owned by AutoTotemCheck.
+        // Totem cycle is owned by the independent AutoTotem* checks.
         if (now == Material.TOTEM_OF_UNDYING || inv.awaitingTotemTransition) return;
 
         boolean legal = ctx.state.log.existsSinceTick(from, p ->
