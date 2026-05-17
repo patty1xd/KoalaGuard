@@ -7,10 +7,14 @@ import com.koalaguard.engine.check.SimCheck;
 import com.koalaguard.engine.state.PositionFrame;
 
 /**
- * NoSlow. While using an item (eating, drinking, blocking, drawing a bow) the
- * vanilla client clamps movement to ~20% speed. Moving near full speed while
- * the use-item state is active is NoSlow. Gated to on-ground, non-ice,
- * stable-transport, no-knockback so momentum can never false-positive.
+ * NoSlow. While genuinely using an item (eating, drinking, blocking, drawing a
+ * bow/crossbow) vanilla clamps movement to ~20% speed.
+ *
+ * The use-state is taken from the SERVER ({@code isHandRaised()} == Mojang's
+ * "isUsingItem"), NOT the spoofable, sticky USE_ITEM packet — a single
+ * right-click to place a block / open a door / throw a pearl used to latch the
+ * old flag on forever and false-positive normal sprinting. Plus ground +
+ * normal-friction + no-knockback gates so only input speed is measured.
  */
 public final class NoSlowCheck extends SimCheck {
 
@@ -25,14 +29,17 @@ public final class NoSlowCheck extends SimCheck {
     public void onTick(CheckContext ctx) {
         PositionFrame f = ctx.state.current;
         if (f == null) return;
-        if (!ctx.state.usingItem || ctx.unstable()
+
+        boolean usingItem;
+        try { usingItem = ctx.player.isHandRaised(); }
+        catch (Throwable t) { usingItem = false; }
+
+        if (!usingItem || ctx.unstable()
                 || ctx.state.exVehicle || ctx.state.exGliding || ctx.state.exRiptide
-                || ctx.state.exLiquid || ctx.state.exWeb) {
+                || ctx.state.exLiquid || ctx.state.exWeb || ctx.state.exClimbing) {
             clean(ctx, 1.0);
             return;
         }
-        // Need the player genuinely grounded on a normal-friction surface, and
-        // no external impulse, so only INPUT speed is being measured.
         if (!f.simGround || f.groundSlipperiness > 0.61) { clean(ctx, 1.0); return; }
         long now = System.currentTimeMillis();
         if (now - ctx.data.lastVelocityMs < 1200 || now - ctx.data.lastDamageMs < 800
@@ -41,11 +48,11 @@ public final class NoSlowCheck extends SimCheck {
             return;
         }
 
-        double max = cfgD("max-use-speed", 0.13);   // vanilla use-speed ≈ 0.054
+        double max = cfgD("max-use-speed", 0.135);   // vanilla use-speed ≈ 0.054
         double h = f.horizontalSpeed();
         if (h > max) {
-            diverge(ctx, (h - max) * cfgD("score-scale", 60.0),
-                    cfgD("threshold", 9.0), cfgI("min-streak", 5),
+            diverge(ctx, (h - max) * cfgD("score-scale", 50.0),
+                    cfgD("threshold", 10.0), cfgI("min-streak", 6),
                     String.format("speed %.3f while using item (max %.2f)", h, max), true);
         } else {
             clean(ctx, 1.5);
