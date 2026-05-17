@@ -27,8 +27,10 @@ import com.koalaguard.engine.checks.movement.SpiderCheck;
 import com.koalaguard.engine.checks.movement.TimerCheck;
 import com.koalaguard.engine.checks.player.InventoryActionCheck;
 import com.koalaguard.engine.checks.player.OffhandCrashCheck;
+import com.koalaguard.engine.checks.world.AutoWebCheck;
 import com.koalaguard.engine.checks.world.MultiPlaceCheck;
 import com.koalaguard.engine.checks.world.NukerCheck;
+import com.koalaguard.engine.checks.world.ScaffoldCheck;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -87,6 +89,8 @@ public final class EngineManager {
         add(new OffhandCrashCheck(plugin));
         add(new NukerCheck(plugin));
         add(new MultiPlaceCheck(plugin));
+        add(new ScaffoldCheck(plugin));
+        add(new AutoWebCheck(plugin));
 
         plugin.getLogger().info("KoalaGuard engine: registered " + byName.size()
                 + " checks (" + frameChecks.size() + " per-frame, "
