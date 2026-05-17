@@ -94,17 +94,29 @@ public final class BukkitStateListener implements Listener {
         }
     }
 
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onResurrect(EntityResurrectEvent event) {
         if (!(event.getEntity() instanceof Player p)) return;
         PlayerData d = plugin.getDataManager().get(p);
-        if (d != null) {
-            // The hand a totem is in right now is about to be consumed; the
-            // engine's inventory mirror will see the transition next tick and
-            // AutoTotemCheck validates the re-equip path purely from packets.
-            d.engine.inv.totemConsumedTick = d.engine.tick;
-            d.engine.inv.awaitingTotemTransition = true;
-        }
+        if (d == null) return;
+        // EXACT pop moment (fires before any refill, so an instant autototem
+        // cannot hide the cycle). seq is a pure counter — advances even when
+        // the player is standing perfectly still; popConf snapshots the
+        // always-advancing transaction clock for a movement-independent
+        // re-equip interval.
+        // Legit "carrying a STACK of totems in the off hand" is unmeasurable
+        // and must never arm a cycle (the user's explicit two-totem concern):
+        // a stack just decrements, the off hand stays a totem, no move packet
+        // ever occurs. Only a single off-hand totem (the autototem vector) arms.
+        org.bukkit.inventory.ItemStack off = p.getInventory().getItemInOffHand();
+        if (off.getType() == Material.TOTEM_OF_UNDYING && off.getAmount() >= 2) return;
+
+        var inv = d.engine.inv;
+        inv.totemConsumedTick = d.engine.tick;
+        inv.totemPopConf = d.confirmedTransactions;
+        inv.totemPopNanos = System.nanoTime();
+        inv.totemPopSeq++;
+        inv.awaitingTotemTransition = true;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
