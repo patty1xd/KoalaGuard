@@ -143,10 +143,10 @@ checks:
     max-violations: 12
     punishment: kick
     ban-duration: 7d
-    max-use-speed: 0.13
-    score-scale: 60.0
-    threshold: 9.0
-    min-streak: 5
+    max-use-speed: 0.135
+    score-scale: 50.0
+    threshold: 10.0
+    min-streak: 6
 
   # ── COMBAT (reconstructed-position raytrace + aim) ──
   reach:
@@ -250,17 +250,12 @@ checks:
     ban-duration: 30d
     threshold: 9.0
     min-streak: 2
-    brand-score: 12.0           # S4 client brand advertises autototem
-    cluster-score: 9.0          # S0 >=2 window-0 clicks within one tick
-    cluster-window-ns: 60000000 # 60 ms = one tick
-    combat-score: 8.0           # S1 off-hand move while attacking (GUI shut)
-    attack-window-ns: 250000000 # 250 ms attack proximity
-    badpacket-score: 8.0        # S3 consecutive same-slot held-item packets
-    consistency-score: 9.0      # S2 machine-uniform placement cadence
-    min-samples: 5
-    sample-cap: 30
-    max-sd-ms: 40.0             # S2 std-dev below this = machine
-    max-mean-ms: 1500.0         # S2 and a short mean
+    brand-score: 12.0           # S2 client brand advertises autototem
+    cluster-min: 2              # S0 >=N window clicks within one tick
+    cluster-score: 9.0
+    cluster-window-ns: 70000000 # 70 ms ~ one tick
+    combat-score: 7.0           # S1 inv-click within 250ms of an attack
+    attack-window-ns: 250000000
 
   # ── Additional movement checks ──
   clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1 }
@@ -270,9 +265,9 @@ checks:
   elytrafly:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-climb-dy: 0.06, rocket-window-ms: 1500, score-scale: 30.0, threshold: 12.0, min-streak: 8 }
 
   # ── Additional combat checks ──
-  killaura:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: permanent, window-ns: 800000000, max-targets: 3, score-scale: 5.0, threshold: 10.0, min-streak: 2 }
+  killaura:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: permanent, multi-window-ns: 800000000, max-targets: 3, multi-score: 5.0, sample-cap: 30, min-samples: 14, max-mean-deg: 2.0, max-sd-deg: 1.2, aim-score: 8.0, threshold: 10.0, min-streak: 3 }
   crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, score-scale: 4.0, threshold: 9.0, min-streak: 3 }
-  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, score: 4.0, threshold: 10.0, min-streak: 6 }
+  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, score: 4.0, threshold: 10.0, min-streak: 5 }
 
   # ── Player / World ──
   inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
