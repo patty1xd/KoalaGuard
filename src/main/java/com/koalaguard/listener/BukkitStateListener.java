@@ -91,9 +91,19 @@ public final class BukkitStateListener implements Listener {
     public void onDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player p)) return;
         PlayerData d = plugin.getDataManager().get(p);
-        if (d != null) {
-            d.lastDamageMs = System.currentTimeMillis();
-            d.engine.combat.lastDamageTakenTick = d.engine.tick;
+        if (d == null) return;
+        d.lastDamageMs = System.currentTimeMillis();
+        d.engine.combat.lastDamageTakenTick = d.engine.tick;
+
+        // FIRST-totem trigger: damage taken while the off hand has NO totem.
+        // (A totem already in the off hand is the pop path — handled by
+        // onResurrect, which fires before the totem is consumed so the off
+        // hand still reads TOTEM here and this does not stamp.)
+        if (p.getInventory().getItemInOffHand().getType() != Material.TOTEM_OF_UNDYING) {
+            var inv = d.engine.inv;
+            inv.vulnNanos = System.nanoTime();
+            inv.vulnTick = d.engine.tick;
+            inv.vulnSeq++;
         }
     }
 
