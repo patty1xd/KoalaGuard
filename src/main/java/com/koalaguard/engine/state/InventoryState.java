@@ -2,6 +2,9 @@ package com.koalaguard.engine.state;
 
 import org.bukkit.Material;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 /**
  * Server-side mirror of the slots the engine reasons about. Refreshed once per
  * tick on the main thread from the authoritative inventory, and annotated with
@@ -59,4 +62,24 @@ public final class InventoryState {
     public boolean hasTotem() {
         return mainHand == Material.TOTEM_OF_UNDYING || offHand == Material.TOTEM_OF_UNDYING;
     }
+
+    // ───────────────── TotemGuard totem-cycle model ─────────────────
+    /**
+     * Recent COMPLETED totem cycles, reconstructed packet-precisely by
+     * {@code TotemCycleProcessor}. The independent AutoTotem* checks read this
+     * read-only; none of them mutate it or each other.
+     */
+    public final Deque<TotemCycle> cycles = new ArrayDeque<>();
+    public long cycleSeq;                 // id assigned to each completed cycle
+
+    // Processor scratch (single-threaded, main-thread engine only).
+    public boolean cycleActive;           // a pop is awaiting its re-equip
+    public long cyclePopNanos;
+    public long cyclePopTick;
+    public long lastProcessedPopSeq = Long.MIN_VALUE;
+
+    // BadPackets Type C — last inventory-click signature for duplicate detect.
+    public int lastClickSlot = Integer.MIN_VALUE;
+    public int lastClickWindow = Integer.MIN_VALUE;
+    public long lastClickNanos = Long.MIN_VALUE;
 }
