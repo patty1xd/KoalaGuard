@@ -73,10 +73,22 @@ public final class InventoryState {
     public long cycleSeq;                 // id assigned to each completed cycle
 
     // Processor scratch (single-threaded, main-thread engine only).
-    public boolean cycleActive;           // a pop is awaiting its re-equip
+    public boolean cycleActive;           // a pop/vuln is awaiting its re-equip
     public long cyclePopNanos;
     public long cyclePopTick;
     public long lastProcessedPopSeq = Long.MIN_VALUE;
+
+    /**
+     * "Vulnerability" trigger: the player took damage while the off hand held
+     * NO totem. A legit player would (slowly, manually) equip one or just not;
+     * an autototem slams one into the off hand inhumanly fast. This is the
+     * FIRST-totem case (no prior pop) — stamped by the damage listener and
+     * reconstructed into a normal cycle by the processor.
+     */
+    public volatile long vulnNanos;
+    public volatile long vulnTick;
+    public volatile long vulnSeq;
+    public long lastProcessedVulnSeq = Long.MIN_VALUE;
 
     // BadPackets Type C — last inventory-click signature for duplicate detect.
     public int lastClickSlot = Integer.MIN_VALUE;
