@@ -34,6 +34,16 @@ public final class PredictionCheck extends SimCheck {
         SimResult sim = ctx.sim;
         if (f == null || s.previous == null) return;
 
+        // Frame-accurate special-block (cobweb/powder-snow/…) test against the
+        // RECONSTRUCTED position, not the once-per-tick live location. Stamp the
+        // grace clock so the residual slowdown after leaving is covered too.
+        var w = ctx.player.getWorld();
+        if (com.koalaguard.util.LocationUtil.inSpecialMovementBlockAt(w, f.x, f.y, f.z)
+                || com.koalaguard.util.LocationUtil.inSpecialMovementBlockAt(
+                        w, s.previous.x, s.previous.y, s.previous.z)) {
+            s.lastSpecialBlockTick = s.tick;
+        }
+
         if (ctx.unstable() || exempt(s) || verticalUnsafe(ctx)) {
             clean(ctx, 0.5);
             return;
@@ -84,7 +94,7 @@ public final class PredictionCheck extends SimCheck {
         // the simulator doesn't model — exempt while inside AND for a short
         // grace after leaving (residual reduced motion + block-edge slack).
         boolean webGrace = s.tick - s.lastSpecialBlockTick
-                < cfgI("special-block-grace-ticks", 12);
+                < cfgI("special-block-grace-ticks", 25);
         return s.exFlying || s.exVehicle || s.exGliding || s.exClimbing
                 || s.exLiquid || s.exRiptide || s.exLevitation || s.exSlowFalling
                 || s.exWeb || webGrace;
