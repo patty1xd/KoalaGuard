@@ -126,4 +126,39 @@ public final class CollisionEngine {
         }
         return false;
     }
+
+    /**
+     * True if a full solid block obstructs the straight segment from the eye to
+     * the target point. Stepped sampling (≈0.2 block) — coarse on purpose: it is
+     * only used to catch combat / placement THROUGH a wall, never to grant a
+     * bypass, so a false "clear" on a thin block is harmless and a false
+     * "blocked" is impossible for an open line. The block containing the eye and
+     * the block containing the target are skipped (you legitimately stand next
+     * to / click the target block itself).
+     */
+    public static boolean rayBlocked(World w,
+                                     double ex, double ey, double ez,
+                                     double tx, double ty, double tz) {
+        if (w == null) return false;
+        double dx = tx - ex, dy = ty - ey, dz = tz - ez;
+        double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist < 0.35) return false;
+        int sbx = (int) Math.floor(ex), sby = (int) Math.floor(ey), sbz = (int) Math.floor(ez);
+        int tbx = (int) Math.floor(tx), tby = (int) Math.floor(ty), tbz = (int) Math.floor(tz);
+        int steps = (int) Math.ceil(dist / 0.2);
+        for (int i = 1; i < steps; i++) {
+            double t = (double) i / steps;
+            int bx = (int) Math.floor(ex + dx * t);
+            int by = (int) Math.floor(ey + dy * t);
+            int bz = (int) Math.floor(ez + dz * t);
+            if ((bx == sbx && by == sby && bz == sbz)
+                    || (bx == tbx && by == tby && bz == tbz)) continue;
+            Block b = w.getBlockAt(bx, by, bz);
+            if (b == null) continue;
+            Material m = b.getType();
+            if (m.isAir() || b.isLiquid() || b.isPassable()) continue;
+            return true;
+        }
+        return false;
+    }
 }
