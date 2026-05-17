@@ -59,7 +59,9 @@ public final class PlayerState {
     // ── per-tick environment exemptions (set by EngineTask before checks) ──
     public boolean exFlying, exVehicle, exGliding, exClimbing,
                    exLiquid, exLevitation, exSlowFalling, exRiptide,
-                   exDead, exSpectator;
+                   exDead, exSpectator, exWeb;
+    /** Tick the player was last in a movement-altering block (web grace). */
+    public long lastSpecialBlockTick = Long.MIN_VALUE / 2;
 
     public PlayerState(UUID uuid, String name) {
         this.uuid = uuid;
