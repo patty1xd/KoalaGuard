@@ -164,12 +164,16 @@ checks:
     threshold: 9.0
     min-streak: 3
 
+  # Lag-compensated: victim hitbox rewound to the attack instant, so the
+  # angular gate is tight (5°) and catches a small hitbox-expander. The wider
+  # fallback slack only applies when no rewound box is available.
   hitvalidation:
     enabled: true
     max-violations: 10
     punishment: kick
     ban-duration: 30d
-    angle-slack-deg: 9.0
+    angle-slack-deg: 5.0
+    fallback-extra-slack-deg: 6.0
     angle-score-scale: 0.6
     noswing-score: 5.0
     swing-window-ticks: 4
@@ -290,12 +294,36 @@ checks:
   aimc:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: 30d, window-ns: 500000000, max-targets: 3, score: 5.0, threshold: 9.0, min-streak: 2 }
   # aimD — snap onto target then snap back (silent / backtrack aura).
   aimd:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, return-window-ticks: 4, snap-min-deg: 22.0, lock-cone-deg: 7.0, return-eps-deg: 9.0, score: 7.0, threshold: 9.0, min-streak: 3 }
-  # aimE — machine-perfect aim lock. Desync-sensitive ⇒ OFF by default.
-  aime:  { enabled: false, max-violations: 10, punishment: kick, ban-duration: 30d, sample-cap: 40, min-samples: 25, max-mean-deg: 2.0, max-sd-deg: 1.0, score: 7.0, threshold: 10.0, min-streak: 2 }
+  # aimE — machine-perfect aim lock, LAG-COMPENSATED (victim rewound to the
+  # attack nanosecond). The geometric catch for Meteor silent aim. Enabled now
+  # that desync is fixed; a human's natural spread (sd >~ 2-4°) clears it.
+  aime:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, sample-cap: 40, min-samples: 20, max-mean-deg: 2.5, max-sd-deg: 1.3, score: 7.0, threshold: 10.0, min-streak: 3 }
+  # aimF — sensitivity/GCD quantization collapse. THE check that catches
+  # Meteor-style silent aim (legal on-target rotation, but synthetic/continuous
+  # so it has no mouse step). Strongest modern signal; large sample + long
+  # streak. Lower min-step-deg only if a genuine raw-input player false-flags.
+  aimf:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, samples: 200, min-samples: 50, min-active-deg: 0.04, max-active-deg: 30.0, min-turn-sum-deg: 60.0, min-step-deg: 0.05, score: 5.0, pitch-score: 3.0, threshold: 12.0, min-streak: 8 }
+  # aimG — unnatural rotation smoothness (no hand tremor). Needs BOTH low
+  # jerk-sign-rate AND low entropy, so legit smooth pursuit never confirms.
+  aimg:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, samples: 200, min-samples: 60, min-active-deg: 0.04, max-active-deg: 30.0, min-turn-sum-deg: 80.0, max-jerk-sign-rate: 0.18, max-entropy-bits: 1.6, score: 5.0, threshold: 12.0, min-streak: 8 }
+  # aimH — inhuman target-acquisition reaction (triggerbot / auto-attack on
+  # visibility). Lag-comp victim history; only clean acquisitions; flags only
+  # when reaction is BOTH too fast AND too consistent over many engagements.
+  aimh:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, engage-gap-ns: 1200000000, reach: 3.2, max-plausible-ms: 2000.0, sample-cap: 24, min-samples: 6, max-mean-ms: 90.0, max-sd-ms: 45.0, score: 7.0, threshold: 10.0, min-streak: 3 }
   crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, score-scale: 4.0, threshold: 9.0, min-streak: 3 }
   criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, score: 4.0, threshold: 10.0, min-streak: 5 }
+  # Honeypot — two invisible trap entities next to a player in a PvP context:
+  # an ArmorStand (catches all-entity/mob auras) AND, when fake-player:true, a
+  # packet-level GHOST PLAYER sent only to that client (catches players-only
+  # aura filters). Neither is renderable/raytraceable by a human, so ANY
+  # interact packet on either id is a kill-aura, ~0 FP by construction.
+  honeypot:     { enabled: true, max-violations: 4, punishment: kick, ban-duration: permanent, fake-player: true, combat-radius: 7.0, spawn-distance: 1.6, lifetime-ms: 2500, cooldown-ms: 12000, score: 20.0, threshold: 9.0, min-streak: 1 }
 
   # ── Player / World ──
+  # Layer 1 — known cheat-client plugin channel / brand fingerprint. The
+  # client outs itself (meteor-client, wurst, liquidbounce, …); vanilla and
+  # legit mods never use these. Immediate, ~0 FP.
+  cheatclient:  { enabled: true, max-violations: 1, punishment: kick, ban-duration: permanent, score: 20.0, threshold: 9.0, min-streak: 1 }
   inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
   # Counts swaps bound to the SAME reconstructed tick (vanilla sends <=1/tick,
   # so mashing F can never trip it — only an injected flood can).
