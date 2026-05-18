@@ -298,11 +298,12 @@ checks:
   # attack nanosecond). The geometric catch for Meteor silent aim. Enabled now
   # that desync is fixed; a human's natural spread (sd >~ 2-4°) clears it.
   aime:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, sample-cap: 40, min-samples: 20, max-mean-deg: 2.5, max-sd-deg: 1.3, score: 7.0, threshold: 10.0, min-streak: 3 }
-  # aimF — sensitivity/GCD quantization collapse. THE check that catches
-  # Meteor-style silent aim (legal on-target rotation, but synthetic/continuous
-  # so it has no mouse step). Strongest modern signal; large sample + long
-  # streak. Lower min-step-deg only if a genuine raw-input player false-flags.
-  aimf:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, samples: 200, min-samples: 50, min-active-deg: 0.04, max-active-deg: 30.0, min-turn-sum-deg: 60.0, min-step-deg: 0.05, score: 5.0, pitch-score: 3.0, threshold: 12.0, min-streak: 8 }
+  # aimF — sensitivity/GCD quantization collapse. DISABLED BY DEFAULT: series-
+  # GCD is genuinely noisy for raw-input / high-DPI players (false-flags them),
+  # exactly the caveat in the design notes. Alert-only (never cancels combat).
+  # Enable + calibrate min-step-deg from `debug:true` [aimf] logs ONLY after
+  # comparing a known-legit player vs the cheat on YOUR server.
+  aimf:  { enabled: false, max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, samples: 200, min-samples: 50, min-active-deg: 0.04, max-active-deg: 30.0, min-turn-sum-deg: 60.0, min-step-deg: 0.05, score: 5.0, pitch-score: 3.0, threshold: 12.0, min-streak: 8 }
   # aimG — unnatural rotation smoothness (no hand tremor). Needs BOTH low
   # jerk-sign-rate AND low entropy, so legit smooth pursuit never confirms.
   aimg:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, samples: 200, min-samples: 60, min-active-deg: 0.04, max-active-deg: 30.0, min-turn-sum-deg: 80.0, max-jerk-sign-rate: 0.18, max-entropy-bits: 1.6, score: 5.0, threshold: 12.0, min-streak: 8 }
@@ -311,13 +312,19 @@ checks:
   # when reaction is BOTH too fast AND too consistent over many engagements.
   aimh:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, engage-gap-ns: 1200000000, reach: 3.2, max-plausible-ms: 2000.0, sample-cap: 24, min-samples: 6, max-mean-ms: 90.0, max-sd-ms: 45.0, score: 7.0, threshold: 10.0, min-streak: 3 }
   crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, score-scale: 4.0, threshold: 9.0, min-streak: 3 }
-  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, score: 4.0, threshold: 10.0, min-streak: 5 }
+  # Uses PRECISE simGround + a real-fall exclusion so legit jump/air crits
+  # never flag — only a hop that never leaves the ground and never falls.
+  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, max-fall: 0.20, score: 4.0, threshold: 10.0, min-streak: 5 }
   # Honeypot — two invisible trap entities next to a player in a PvP context:
   # an ArmorStand (catches all-entity/mob auras) AND, when fake-player:true, a
   # packet-level GHOST PLAYER sent only to that client (catches players-only
   # aura filters). Neither is renderable/raytraceable by a human, so ANY
   # interact packet on either id is a kill-aura, ~0 FP by construction.
-  honeypot:     { enabled: true, max-violations: 4, punishment: kick, ban-duration: permanent, fake-player: true, combat-radius: 7.0, spawn-distance: 1.6, lifetime-ms: 2500, cooldown-ms: 12000, score: 20.0, threshold: 9.0, min-streak: 1 }
+  # max-aim-deg: an invisible entity still has a client hitbox, so a legit
+  # player looking toward it (building/mining/fighting) can raytrace it. Only
+  # flag when the reconstructed look was MORE than this many degrees off the
+  # honeypot — a real crosshair could not have produced that interact.
+  honeypot:     { enabled: true, max-violations: 4, punishment: kick, ban-duration: permanent, fake-player: true, combat-radius: 7.0, spawn-distance: 1.6, lifetime-ms: 2500, cooldown-ms: 12000, max-aim-deg: 50.0, score: 20.0, threshold: 9.0, min-streak: 1 }
 
   # ── Player / World ──
   # Layer 1 — known cheat-client plugin channel / brand fingerprint. The
@@ -331,6 +338,8 @@ checks:
   multiplace:   { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, window-ns: 70000000, max-places-per-tick: 3, score-scale: 4.0, threshold: 10.0, min-streak: 2 }
   # Time-aligned to the EXACT place tick + real clicked FACE (not the loose
   # live-eye/block-centre the old version used).
-  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 60.0, max-reach: 5.2, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, sample-cap: 24, min-samples: 8, max-sd-interval: 0.85, max-sd-pitch: 1.2, cadence-score: 6.0, threshold: 11.0, min-streak: 3 }
+  # max-angle raised (recon. eye lags a flick-down place); cadence only
+  # CORROBORATES an aim-off/backward place now (rhythmic bridging is human).
+  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 78.0, max-reach: 5.2, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
   # AutoWeb — automatic cobweb placement on/around an opponent in combat.
   autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, attack-window-ticks: 4, combat-radius: 5.0, max-angle: 55.0, aim-score: 6.0, combat-score: 5.0, sample-cap: 20, min-samples: 6, max-sd-interval: 0.9, cadence-score: 6.0, threshold: 10.0, min-streak: 3 }
