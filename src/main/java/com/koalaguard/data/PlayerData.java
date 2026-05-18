@@ -51,6 +51,11 @@ public final class PlayerData {
     public volatile boolean flagBadChannel;
     public volatile String badChannel = "";
 
+    /** Clip / phase-teleport (.vclip/.hclip): moved through solid with no
+     *  server teleport. Stamped by the engine, consumed by ClipCheck. */
+    public volatile long clipSeq;
+    public volatile String clipDetail = "";
+
     // ───────────────── transaction / tick clock ─────────────────
     /** transaction id -> send nanoTime, pending until the client echoes Pong. */
     public final Map<Integer, Long> pendingTransactions = new ConcurrentHashMap<>();
