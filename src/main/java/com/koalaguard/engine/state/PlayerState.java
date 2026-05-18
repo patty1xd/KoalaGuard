@@ -32,6 +32,8 @@ public final class PlayerState {
 
     public final InventoryState inv = new InventoryState();
     public final CombatState combat = new CombatState();
+    /** Victim position history — combat lag compensation. */
+    public final TargetTracker targets = new TargetTracker();
 
     // ── tick-indexed kinematic history ──
     private static final int FRAME_CAP = 256;
@@ -50,8 +52,9 @@ public final class PlayerState {
     /** Movement frames replayed in the current server tick (Blink burst). */
     public int framesThisTick;
 
-    // ── rotation history (true client aim, tick indexed) ──
-    private final float[][] rot = new float[128][2];
+    // ── rotation history (true client aim) — large enough for GCD / entropy
+    //    analysis over a 200+ sample combat window ──
+    private final float[][] rot = new float[320][2];
     private int rotHead, rotCount;
 
     // ── volatile booleans written by netty, read by main thread ──
@@ -116,6 +119,21 @@ public final class PlayerState {
     }
     public List<Float> pitchDeltas(int max) {
         return deltas(1, max);
+    }
+
+    /** SIGNED yaw deltas (deg), oldest→newest — for jerk / tremor analysis. */
+    public List<Float> signedYawDeltas(int max) {
+        List<Float> vals = new ArrayList<>();
+        int n = Math.min(rotCount, max + 1);
+        int idx = (rotHead - n + rot.length) % rot.length;
+        Float prev = null;
+        for (int i = 0; i < n; i++) {
+            float v = rot[idx][0];
+            if (prev != null) vals.add(wrap(v - prev));
+            prev = v;
+            idx = (idx + 1) % rot.length;
+        }
+        return vals;
     }
 
     private List<Float> deltas(int axis, int max) {
