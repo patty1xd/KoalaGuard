@@ -8,6 +8,7 @@ import com.koalaguard.engine.util.Combat;
 import com.koalaguard.engine.state.PositionFrame;
 import org.bukkit.entity.Entity;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,16 +44,33 @@ public final class ReachCheck extends SimCheck {
 
         PositionFrame f = ctx.state.frameAtOrBefore(atk);
         double[] eye = Combat.eyeLook(f, ctx.player);
-        // Lag compensation: the victim hitbox rewound to the attack instant —
-        // a reach hack can no longer hide behind the victim lagging toward us.
-        double[] box = ctx.state.targets.boxAt(vid, ctx.state.combat.lastAttackNanos);
-        double dist = box != null
-                ? Combat.distanceToBox(eye[0], eye[1], eye[2], box)
-                : Combat.distanceToBox(eye[0], eye[1], eye[2], victim);
+
+        // PROPER lag compensation: the victim could have been at ANY of its
+        // recent positions within the network-uncertainty window. Take the
+        // SMALLEST eye→hitbox distance over that window — only flag if the hit
+        // is out of reach even for the most favourable victim position. This
+        // is what removes the killaura-range false positives: reconstruction
+        // jitter (~0.2-0.4) no longer pushes a legit 3.0 hit over the limit.
+        long atkNs = ctx.state.combat.lastAttackNanos;
+        long winNs = cfgL("lag-window-ms", 200L) * 1_000_000L;
+        double dist = Double.MAX_VALUE;
+        List<double[]> hist = ctx.state.targets.history(vid);
+        for (double[] s : hist) {
+            if (Math.abs((long) s[0] - atkNs) > winNs) continue;
+            double[] bx = { s[1], s[2], s[3], s[4], s[5], s[6] };
+            dist = Math.min(dist, Combat.distanceToBox(eye[0], eye[1], eye[2], bx));
+        }
+        if (dist == Double.MAX_VALUE) {                 // no snapshot in window
+            double[] box = ctx.state.targets.boxAt(vid, atkNs);
+            dist = box != null
+                    ? Combat.distanceToBox(eye[0], eye[1], eye[2], box)
+                    : Combat.distanceToBox(eye[0], eye[1], eye[2], victim);
+        }
 
         double base = cfgD("max-reach", 3.0);
         double tol = Math.min(cfgD("max-jitter-slack", 0.5),
-                ctx.lag().toleranceTicks() * 0.03);
+                ctx.lag().toleranceTicks() * 0.03)
+                + cfgD("recon-slack", 0.30);            // eye-reconstruction error
         double limit = base + tol;
 
         if (dist > limit) {
