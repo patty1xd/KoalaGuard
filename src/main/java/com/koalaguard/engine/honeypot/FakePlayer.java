@@ -7,19 +7,22 @@ import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.protocol.player.UserProfile;
 import com.github.retrooper.packetevents.protocol.world.Location;
+import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoRemove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import com.koalaguard.KoalaGuard;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
 
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -46,7 +49,10 @@ public final class FakePlayer {
     public static final class Ghost {
         public final int entityId;
         public final UUID uuid;
-        Ghost(int entityId, UUID uuid) { this.entityId = entityId; this.uuid = uuid; }
+        public final String team;
+        Ghost(int entityId, UUID uuid, String team) {
+            this.entityId = entityId; this.uuid = uuid; this.team = team;
+        }
     }
 
     public static Ghost spawn(KoalaGuard plugin, Player viewer,
@@ -54,7 +60,8 @@ public final class FakePlayer {
         try {
             int eid = ID.updateAndGet(v -> v >= 2_100_000_000 ? 2_000_000_000 : v + 1);
             UUID uuid = UUID.randomUUID();
-            UserProfile profile = new UserProfile(uuid, randomName());
+            String name = randomName();
+            UserProfile profile = new UserProfile(uuid, name);
 
             WrapperPlayServerPlayerInfoUpdate.PlayerInfo info =
                     new WrapperPlayServerPlayerInfoUpdate.PlayerInfo(
@@ -63,9 +70,22 @@ public final class FakePlayer {
                     EnumSet.of(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER),
                     List.of(info)));
 
+            // Scoreboard team with nametag NEVER → the ghost's name tag is not
+            // rendered at all (the only way to hide a player entity's tag).
+            send(viewer, new WrapperPlayServerTeams(name,
+                    WrapperPlayServerTeams.TeamMode.CREATE,
+                    new WrapperPlayServerTeams.ScoreBoardTeamInfo(
+                            Component.empty(), null, null,
+                            WrapperPlayServerTeams.NameTagVisibility.NEVER,
+                            WrapperPlayServerTeams.CollisionRule.NEVER,
+                            NamedTextColor.WHITE,
+                            WrapperPlayServerTeams.OptionData.NONE),
+                    name));
+
             send(viewer, new WrapperPlayServerSpawnEntity(
-                    eid, Optional.of(uuid), EntityTypes.PLAYER,
-                    new Location(x, y, z, yaw, 0f), 0f, 0, Optional.empty()));
+                    eid, uuid, EntityTypes.PLAYER,
+                    new Location(x, y, z, yaw, 0f), 0f, 0,
+                    new Vector3d(0.0, 0.0, 0.0)));
 
             // Invisible: shared entity-flags byte (index 0), bit 0x20.
             send(viewer, new WrapperPlayServerEntityMetadata(eid, List.of(
@@ -75,7 +95,7 @@ public final class FakePlayer {
             send(viewer, new WrapperPlayServerPlayerInfoRemove(
                     Collections.singletonList(uuid)));
 
-            return new Ghost(eid, uuid);
+            return new Ghost(eid, uuid, name);
         } catch (Throwable t) {
             if (!warned) {
                 warned = true;
@@ -94,6 +114,11 @@ public final class FakePlayer {
         try {
             send(viewer, new WrapperPlayServerPlayerInfoRemove(
                     Collections.singletonList(g.uuid)));
+        } catch (Throwable ignored) { }
+        try {
+            send(viewer, new WrapperPlayServerTeams(g.team,
+                    WrapperPlayServerTeams.TeamMode.REMOVE,
+                    (WrapperPlayServerTeams.ScoreBoardTeamInfo) null));
         } catch (Throwable ignored) { }
     }
 
