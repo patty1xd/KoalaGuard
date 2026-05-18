@@ -33,9 +33,14 @@ public final class ReachCheck extends SimCheck {
     public void onTick(CheckContext ctx) {
         long atk = ctx.state.combat.lastAttackTick;
         if (atk < 0) return;
+        // Dedupe on the attack's unique receive-nanos, NOT lastAttackTick:
+        // s.tick is frozen while the attacker stands still (rotation-only
+        // packets build no frame), so a tick key would evaluate only the
+        // FIRST stationary attack and silently skip every one after it.
+        long atkNs = ctx.state.combat.lastAttackNanos;
         UUID id = ctx.data.getUuid();
-        if (seen.getOrDefault(id, -1L) == atk) return;   // already evaluated
-        seen.put(id, atk);
+        if (seen.getOrDefault(id, -1L) == atkNs) return;   // already evaluated
+        seen.put(id, atkNs);
         if (ctx.unstableBasic()) return;
 
         int vid = ctx.state.combat.lastAttackEntityId;

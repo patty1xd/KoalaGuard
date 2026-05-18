@@ -37,9 +37,11 @@ public final class HitValidationCheck extends SimCheck {
     public void onTick(CheckContext ctx) {
         long atk = ctx.state.combat.lastAttackTick;
         if (atk < 0) return;
+        // Dedupe on unique attack-nanos, not the (stationary-frozen) tick.
+        long atkNs = ctx.state.combat.lastAttackNanos;
         UUID id = ctx.data.getUuid();
-        if (seen.getOrDefault(id, -1L) == atk) return;
-        seen.put(id, atk);
+        if (seen.getOrDefault(id, -1L) == atkNs) return;
+        seen.put(id, atkNs);
         if (ctx.unstableBasic()) return;
 
         int vid = ctx.state.combat.lastAttackEntityId;

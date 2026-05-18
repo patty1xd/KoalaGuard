@@ -13,16 +13,27 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Mace smash exploit ("MaceKill" / "MaceDamage"). The 1.21 mace deals a huge
- * bonus only when the attacker is genuinely FALLING — the server scales the
- * smash by the attacker's fall. The cheat keeps a normal grounded position but
- * tells the server it is airborne / falling (spoofed onGround / fake fall) so
- * the server grants the smash bonus with no real fall.
+ * bonus ONLY when the attacker genuinely FELL — the server scales the smash by
+ * the attacker's real fall distance. A grounded mace hit deals normal melee
+ * damage. The cheat makes the server hand out (or directly injects) the smash
+ * bonus while the attacker is standing on the ground — "100 hearts while bro
+ * is on the ground".
  *
- * Packet-only, server-authoritative: with a MACE in hand, if the client CLAIMED
- * it was airborne around the hit while server collision says it was supported
- * the whole time AND there was no genuine descent, the smash was faked. A legit
- * mace smash has a real airborne arc + real downward velocity → never flags. A
- * normal grounded mace hit never claims air → never flags.
+ * Detection is server-authoritative and damage-driven:
+ *   • the SERVER-computed damage of the mace hit (incl. any smash bonus) is
+ *     captured from EntityDamageByEntityEvent,
+ *   • a hit whose damage is far above any non-smash mace hit is a SMASH,
+ *   • a real smash REQUIRES a genuine fall. We confirm "no real fall" two
+ *     independent ways: the server's own fall view at the hit instant, AND the
+ *     reconstructed frames (geometry-true simGround + a real descent arc). A
+ *     legit jump/air smash has a real fall on BOTH → never flags. A grounded
+ *     normal mace hit never reaches smash damage → never flags. Only a
+ *     smash-magnitude hit with no real fall confirms.
+ *
+ * No {@code claimedAir} requirement (the old check's fatal bug — a cheat that
+ * sends ordinary grounded movement never claims air, so that check could
+ * never fire). No frame dependency for the trigger (works while standing
+ * perfectly still — the classic test).
  */
 public final class MaceCheck extends SimCheck {
 
@@ -34,44 +45,50 @@ public final class MaceCheck extends SimCheck {
 
     @Override
     public void onTick(CheckContext ctx) {
-        long atk = ctx.state.combat.lastAttackTick;
-        if (atk < 0) return;
+        long hitNs = ctx.state.combat.lastMaceHitNanos;
+        if (hitNs <= Long.MIN_VALUE / 2) return;             // no mace hit yet
         UUID id = ctx.data.getUuid();
-        if (seen.getOrDefault(id, -1L) == atk) return;
-        seen.put(id, atk);
+        if (seen.getOrDefault(id, Long.MIN_VALUE) == hitNs) return;
+        seen.put(id, hitNs);
         if (ctx.unstableBasic()) return;
-        if (ctx.state.inv.mainHand != Material.MACE) return;          // mace only
-        if (ctx.state.exVehicle || ctx.state.exClimbing || ctx.state.exLiquid
-                || ctx.state.exLevitation || ctx.state.exGliding || ctx.state.exWeb
-                || ctx.state.exRiptide) return;
 
-        int win = cfgI("window-ticks", 6);
-        boolean claimedAir = false, leftGround = false, haveFrames = false;
+        double dmg = ctx.state.combat.lastMaceDamage;
+        double vanillaMax = cfgD("vanilla-max-damage", 25.0);
+        if (dmg <= vanillaMax) { clean(ctx, 2.0); return; }   // normal mace hit
+
+        // ── A SMASH-magnitude hit landed. Did a genuine fall actually occur? ──
+
+        // (1) Server's own view at the hit instant. Real fall ⇒ legit.
+        float serverFall = ctx.state.combat.lastMaceFallDistance;
+        boolean serverSawFall = serverFall >= (float) cfgD("min-fall-blocks", 1.0);
+
+        // (2) Independent geometric reconstruction over the frames around the
+        //     hit. A genuine fall genuinely loses top-face support (simGround
+        //     false) AND has a real downward arc — a packet-spoofed "fall"
+        //     keeps real ground support the whole time.
+        long atk = ctx.state.combat.lastAttackTick;
+        int win = cfgI("window-ticks", 8);
         double maxDown = 0;
-        for (PositionFrame f : ctx.state.recentFrames(16)) {
-            if (f.tick > atk || f.tick < atk - win) continue;
+        boolean leftGround = false, haveFrames = false;
+        for (PositionFrame f : ctx.state.recentFrames(20)) {
+            if (atk >= 0 && (f.tick > atk || f.tick < atk - win)) continue;
             haveFrames = true;
             maxDown = Math.min(maxDown, f.dy);
-            if (!f.clientGround) claimedAir = true;     // client said "airborne"
-            if (!f.simGround) leftGround = true;        // server agrees airborne
+            if (!f.simGround) leftGround = true;
         }
-        if (!haveFrames) return;
+        boolean realFall = leftGround && maxDown < -cfgD("min-fall-dy", 0.25);
 
-        // Faked smash: client advertised airborne/falling to earn the bonus,
-        // but server geometry shows it was supported throughout AND there was
-        // no genuine downward velocity (a real smash has a true fall arc).
-        boolean realFall = maxDown < -cfgD("min-fall-dy", 0.25);
-        boolean faked = claimedAir && !leftGround && !realFall;
+        boolean genuineFall = serverSawFall || realFall;
+        if (genuineFall) { clean(ctx, 2.0); return; }         // legit jump/air smash
 
-        if (faked) {
-            if (diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 10.0),
-                    cfgI("min-streak", 3),
-                    String.format("mace smash with no real fall (claimedAir, simGround, maxDown=%.3f)",
-                            maxDown), false)) {
-                armCombatCancel(ctx);
-            }
-        } else {
-            clean(ctx, 2.0);
+        // Smash damage with no real fall by EITHER measure ⇒ forged smash.
+        if (diverge(ctx, cfgD("score", 8.0), cfgD("threshold", 10.0),
+                cfgI("min-streak", 2),
+                String.format(
+                    "mace smash %.1f dmg with no real fall (serverFall=%.2f, simGround=%b, maxDown=%.3f, frames=%b)",
+                    dmg, serverFall, !leftGround, maxDown, haveFrames),
+                false)) {
+            armCombatCancel(ctx);
         }
     }
 
