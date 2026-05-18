@@ -27,4 +27,13 @@ public final class CombatState {
     public long lastDamageTakenTick = -1;
     /** Wall-clock of the last entity attack (GUI-impossible-while-attacking). */
     public volatile long lastAttackNanos = Long.MIN_VALUE / 2;
+
+    // ── Mace smash: the SERVER-computed damage this player just dealt with a
+    //    mace, plus its receive instant. Stamped from EntityDamageByEntityEvent
+    //    (server-authoritative — includes the smash bonus). MaceCheck compares
+    //    this against whether a genuine fall actually happened.
+    public volatile long   lastMaceHitNanos = Long.MIN_VALUE / 2;
+    public volatile double lastMaceDamage;
+    public volatile float  lastMaceFallDistance;
+    public volatile boolean lastMaceOnGround;
 }
