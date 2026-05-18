@@ -12,6 +12,8 @@ import com.koalaguard.engine.checks.combat.AimG;
 import com.koalaguard.engine.checks.combat.AimH;
 import com.koalaguard.engine.checks.combat.AutoClickerCheck;
 import com.koalaguard.engine.checks.combat.HoneypotCheck;
+import com.koalaguard.engine.checks.combat.MaceCheck;
+import com.koalaguard.engine.checks.combat.ShieldBypassCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
@@ -31,6 +33,7 @@ import com.koalaguard.engine.checks.movement.AirJumpCheck;
 import com.koalaguard.engine.checks.movement.AntiVoidCheck;
 import com.koalaguard.engine.checks.movement.BlinkCheck;
 import com.koalaguard.engine.checks.movement.ClickTpCheck;
+import com.koalaguard.engine.checks.movement.ClipCheck;
 import com.koalaguard.engine.checks.movement.ElytraFlyCheck;
 import com.koalaguard.engine.checks.movement.FastClimbCheck;
 import com.koalaguard.engine.checks.movement.JesusCheck;
@@ -42,6 +45,7 @@ import com.koalaguard.engine.checks.movement.SpiderCheck;
 import com.koalaguard.engine.checks.movement.TimerCheck;
 import com.koalaguard.engine.checks.player.CheatClientCheck;
 import com.koalaguard.engine.checks.player.InventoryActionCheck;
+import com.koalaguard.engine.checks.player.MultiTaskCheck;
 import com.koalaguard.engine.checks.player.OffhandCrashCheck;
 import com.koalaguard.engine.checks.world.AutoWebCheck;
 import com.koalaguard.engine.checks.world.MultiPlaceCheck;
@@ -81,6 +85,7 @@ public final class EngineManager {
         add(new AirJumpCheck(plugin));
         add(new NoSlowCheck(plugin));
         add(new ClickTpCheck(plugin));
+        add(new ClipCheck(plugin));
         add(new BlinkCheck(plugin));
         add(new JesusCheck(plugin));
         add(new SpiderCheck(plugin));
@@ -105,6 +110,8 @@ public final class EngineManager {
         add(new AimG(plugin));
         add(new AimH(plugin));
         add(new HoneypotCheck(plugin));
+        add(new MaceCheck(plugin));
+        add(new ShieldBypassCheck(plugin));
 
         // ── Inventory: interaction-chain state machines ──
         add(new InventoryChainCheck(plugin));
@@ -122,6 +129,7 @@ public final class EngineManager {
 
         // ── Player / World ──
         add(new CheatClientCheck(plugin));
+        add(new MultiTaskCheck(plugin));
         add(new InventoryActionCheck(plugin));
         add(new OffhandCrashCheck(plugin));
         add(new NukerCheck(plugin));
