@@ -7,10 +7,13 @@ import com.koalaguard.engine.check.SimCheck;
 import com.koalaguard.engine.honeypot.FakePlayer;
 import com.koalaguard.engine.packet.CapturedPacket;
 import com.koalaguard.engine.packet.PacketKind;
+import com.koalaguard.engine.state.PositionFrame;
+import com.koalaguard.engine.util.Combat;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 import java.util.Map;
 import java.util.UUID;
@@ -46,6 +49,7 @@ public final class HoneypotCheck extends SimCheck {
         long spawnNanos;
         long despawnAtMs;
         long nextSpawnMs;
+        double hx, hy, hz;          // honeypot body-centre (look-gate)
     }
 
     private final Map<UUID, H> pots = new ConcurrentHashMap<>();
@@ -69,10 +73,29 @@ public final class HoneypotCheck extends SimCheck {
                 boolean hitStand = h.standId >= 0 && p.intA == h.standId;
                 boolean hitGhost = p.intA == ghostId;
                 if (!hitStand && !hitGhost) continue;
+
+                // CRITICAL FP guard: an invisible entity still has a client
+                // hitbox, so a legit player who looks toward it (building,
+                // mining, fighting the real opponent) and left-clicks will
+                // raytrace it. Reconstruct the look at the hit tick — if the
+                // crosshair was actually pointing at the honeypot it COULD be
+                // a real (accidental) raytrace, so DO NOT flag. Only an
+                // entity-iterating aura attacks while looking well away from it.
+                PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
+                double[] el = Combat.eyeLook(f, player);
+                double tx = h.hx - el[0], ty = h.hy - el[1], tz = h.hz - el[2];
+                double dlen = Math.sqrt(tx * tx + ty * ty + tz * tz);
+                if (dlen > 1e-3) {
+                    Vector look = Combat.lookVector((float) el[3], (float) el[4]);
+                    double dot = (look.getX() * tx + look.getY() * ty + look.getZ() * tz) / dlen;
+                    double ang = Math.toDegrees(Math.acos(Math.max(-1.0, Math.min(1.0, dot))));
+                    if (ang < cfgD("max-aim-deg", 50.0)) continue;   // could be legit
+                }
+
                 diverge(ctx, cfgD("score", 20.0), cfgD("threshold", 9.0),
                         cfgI("min-streak", 1),
-                        "attacked invisible honeypot " + (hitGhost ? "ghost-player" : "entity")
-                                + " (id " + p.intA + ")", false);
+                        "attacked unrenderable honeypot " + (hitGhost ? "ghost-player" : "entity")
+                                + " while looking away (id " + p.intA + ")", false);
                 armCombatCancel(ctx);
                 despawn(player, h);
                 h.nextSpawnMs = now + cfgL("cooldown-ms", 12_000L);
@@ -114,7 +137,11 @@ public final class HoneypotCheck extends SimCheck {
             ArmorStand stand = player.getWorld().spawn(loc, ArmorStand.class, a -> {
                 a.setVisible(false);
                 a.setGravity(false);
-                a.setMarker(false);          // keep a (invisible) hitbox to target
+                a.setMarker(true);           // ZERO hitbox — a vanilla client
+                                             // physically cannot raytrace it,
+                                             // so no legit click can ever hit
+                                             // it; an entity-iterating aura
+                                             // (attacks by id) still does.
                 a.setCollidable(false);      // never obstruct players
                 a.setSmall(true);
                 a.setBasePlate(false);
@@ -141,6 +168,9 @@ public final class HoneypotCheck extends SimCheck {
             h.active = true;
             h.spawnNanos = System.nanoTime();
             h.despawnAtMs = now + cfgL("lifetime-ms", 2500L);
+            h.hx = loc.getX();
+            h.hy = loc.getY() + 1.0;        // body centre (stand or ghost)
+            h.hz = loc.getZ();
         } else {
             h.nextSpawnMs = now + cfgL("cooldown-ms", 12_000L);
         }
