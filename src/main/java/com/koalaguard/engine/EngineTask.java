@@ -124,6 +124,42 @@ public final class EngineTask extends BukkitRunnable {
         }
 
         double dx = x - s.prevX, dy = y - s.prevY, dz = z - s.prevZ;
+
+        // ── Clip detection (.vclip / .hclip / phase-teleport) ──
+        // Runs BEFORE the >8 reset (which is exactly why big vclips were never
+        // caught — they looked like a legit teleport and were discarded). A
+        // single client move whose straight path passes THROUGH solid blocks,
+        // with no server-initiated teleport (Paper's internal anti-move
+        // correction does NOT fire PlayerTeleportEvent, so lastTeleportMs is
+        // only set by REAL pearls/commands/portals), is a clip — conclusive.
+        if (evaluate && !d.setbackPending) {
+            double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            long now = System.currentTimeMillis();
+            boolean graced = now - d.lastTeleportMs   < 1500
+                    || now - d.lastRespawnMs    < 2500
+                    || now - d.lastWorldChangeMs < 4000
+                    || now - d.lastVelocityMs   < 1500
+                    || now - d.joinMs           < 3500;
+            boolean special = s.exVehicle || s.exGliding || s.exRiptide
+                    || s.exLevitation || s.exWeb || s.exClimbing;
+            double minDist = plugin.getConfig().getDouble("checks.clip.min-dist", 1.0);
+            if (dist > minDist && !graced && !special) {
+                var w = player.getWorld();
+                boolean through =
+                        CollisionEngine.rayBlocked(w, s.prevX, s.prevY + 0.9, s.prevZ, x, y + 0.9, z)
+                     || CollisionEngine.rayBlocked(w, s.prevX, s.prevY + 0.1, s.prevZ, x, y + 0.1, z);
+                if (through) {
+                    d.clipSeq++;
+                    d.clipDetail = String.format(
+                            "moved %.1f blocks through solid (dx=%.1f dy=%.1f dz=%.1f), no server teleport",
+                            dist, dx, dy, dz);
+                    s.prevX = x; s.prevY = y; s.prevZ = z;   // re-baseline
+                    s.prevYaw = yaw; s.prevPitch = pitch;
+                    return false;
+                }
+            }
+        }
+
         if (Math.abs(dx) > 8 || Math.abs(dy) > 8 || Math.abs(dz) > 8) {
             // ungraced teleport / world move — reset baseline, don't evaluate
             s.prevX = x; s.prevY = y; s.prevZ = z;
