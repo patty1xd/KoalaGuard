@@ -47,6 +47,9 @@ public final class PlayerData {
     public volatile String clientBrand = "vanilla";
     public volatile String packetBrand = "vanilla";
     public volatile boolean flagBadBrand;
+    /** A known cheat-client plugin channel was registered/used (Layer 1). */
+    public volatile boolean flagBadChannel;
+    public volatile String badChannel = "";
 
     // ───────────────── transaction / tick clock ─────────────────
     /** transaction id -> send nanoTime, pending until the client echoes Pong. */
