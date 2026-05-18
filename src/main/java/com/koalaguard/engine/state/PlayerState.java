@@ -57,6 +57,11 @@ public final class PlayerState {
     private final float[][] rot = new float[320][2];
     private int rotHead, rotCount;
 
+    // Most-recent client rotation as seen on the NETTY thread (packet-ordered,
+    // never stale) — used to stamp non-movement packets (block place, etc.)
+    // that carry no rotation of their own.
+    public volatile float netYaw, netPitch;
+
     // ── volatile booleans written by netty, read by main thread ──
     public volatile boolean sprinting, sneaking, usingItem;
     public volatile long usingItemSinceNanos;
