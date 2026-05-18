@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
 import org.bukkit.event.inventory.ClickType;
@@ -105,6 +106,26 @@ public final class BukkitStateListener implements Listener {
             inv.vulnTick = d.engine.tick;
             inv.vulnSeq++;
         }
+    }
+
+    /**
+     * Mace smash damage capture. The 1.21 mace only grants its huge smash
+     * bonus when the attacker GENUINELY fell — the server scales it by the
+     * attacker's fall. We record the SERVER-computed damage (already includes
+     * the bonus at MONITOR) plus the server's own fall/ground view at the hit
+     * instant; MaceCheck flags a smash-magnitude hit that had no real fall.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMaceHit(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player atk)) return;
+        PlayerData d = plugin.getDataManager().get(atk);
+        if (d == null) return;
+        if (atk.getInventory().getItemInMainHand().getType() != Material.MACE) return;
+        CombatState c = d.engine.combat;
+        c.lastMaceDamage = event.getDamage();          // server-computed (incl. smash)
+        c.lastMaceFallDistance = atk.getFallDistance();
+        c.lastMaceOnGround = atk.isOnGround();
+        c.lastMaceHitNanos = System.nanoTime();        // publish LAST (volatile fence)
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
