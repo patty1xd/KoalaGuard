@@ -116,12 +116,11 @@ public final class AimH extends SimCheck {
                     + "ms n=" + s.react.size());
         }
         if (mean < cfgD("max-mean-ms", 90.0) && sd < cfgD("max-sd-ms", 45.0)) {
-            if (diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 10.0),
+            // Alert only — staff correlate; no single-confirm combat cancel.
+            diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 10.0),
                     cfgI("min-streak", 3),
                     String.format("inhuman reaction mean=%.0fms sd=%.0fms n=%d",
-                            mean, sd, s.react.size()), false)) {
-                armCombatCancel(ctx);
-            }
+                            mean, sd, s.react.size()), false);
         } else {
             clean(ctx, 1.0);
         }

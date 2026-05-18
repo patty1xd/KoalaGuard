@@ -86,12 +86,11 @@ public final class AimE extends SimCheck {
         double mean = MathUtil.average(s.err);
         double sd = MathUtil.standardDeviation(s.err);
         if (mean < cfgD("max-mean-deg", 2.5) && sd < cfgD("max-sd-deg", 1.3)) {
-            if (diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 10.0),
+            // Alert only — never cancel combat off a single statistical confirm.
+            diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 10.0),
                     cfgI("min-streak", 3),
                     String.format("lag-comp machine lock mean=%.2f° sd=%.2f° n=%d",
-                            mean, sd, s.err.size()), false)) {
-                armCombatCancel(ctx);
-            }
+                            mean, sd, s.err.size()), false);
         } else if (any) {
             clean(ctx, 1.0);
         }

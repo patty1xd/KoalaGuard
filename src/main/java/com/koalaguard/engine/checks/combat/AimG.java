@@ -91,13 +91,13 @@ public final class AimG extends SimCheck {
                     + " n=" + d.size() + " turn=" + String.format("%.0f", turn));
         }
 
+        // Alert only — a behavioural statistic must not neutralise combat on
+        // its own; staff correlate it with the other independent signals.
         if (tooSmooth && lowEntropy) {
-            if (diverge(ctx, cfgD("score", 5.0), cfgD("threshold", 12.0),
+            diverge(ctx, cfgD("score", 5.0), cfgD("threshold", 12.0),
                     cfgI("min-streak", 8),
                     String.format("smooth rotation: jerkSignRate=%.3f entropy=%.2f n=%d",
-                            signRate, entropy, d.size()), false)) {
-                armCombatCancel(ctx);
-            }
+                            signRate, entropy, d.size()), false);
         } else {
             clean(ctx, 1.0);
         }

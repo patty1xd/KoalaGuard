@@ -94,11 +94,12 @@ public final class AimF extends SimCheck {
                     + " bad=" + bad);
         }
 
+        // Alert only — never silently cancel combat. Series-GCD is genuinely
+        // noisy for raw-input / high-DPI players; this is a staff signal that
+        // must NOT neutralise a fight on its own (it is disabled by default).
         if (bad > 0) {
-            if (diverge(ctx, bad, cfgD("threshold", 12.0), cfgI("min-streak", 8),
-                    "synthetic rotation :: " + why.toString().trim(), false)) {
-                armCombatCancel(ctx);
-            }
+            diverge(ctx, bad, cfgD("threshold", 12.0), cfgI("min-streak", 8),
+                    "synthetic rotation :: " + why.toString().trim(), false);
         } else {
             clean(ctx, 1.0);
         }
