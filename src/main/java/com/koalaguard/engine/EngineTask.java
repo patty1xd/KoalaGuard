@@ -67,6 +67,7 @@ public final class EngineTask extends BukkitRunnable {
 
             s.framesThisTick = 0;
             int processed = 0;
+            boolean moveCap = false;
             CapturedPacket p;
             while ((p = s.intake.poll()) != null) {
                 p.tickIndex = s.tick;
@@ -74,7 +75,17 @@ public final class EngineTask extends BukkitRunnable {
                 s.log.append(p);
 
                 if (p.kind == PacketKind.MOVEMENT) {
-                    if (++processed > MAX_FRAMES_PER_TICK) { s.intake.clear(); break; }
+                    // Cap reconstructed movement frames per tick, but DO NOT
+                    // clear the intake — that used to delete every queued
+                    // attack / click / totem-move behind a movement burst
+                    // (lagswitch/blink), silently disabling combat & inventory
+                    // detection. The packet is still logged (Blink sees the
+                    // burst); we just skip frame reconstruction past the cap
+                    // and keep draining auxiliary packets.
+                    if (moveCap || ++processed > MAX_FRAMES_PER_TICK) {
+                        moveCap = true;
+                        continue;
+                    }
                     if (handleMovement(player, d, s, p, evaluate)) break; // setback
                 } else {
                     handleAuxiliary(s, p);
@@ -145,9 +156,11 @@ public final class EngineTask extends BukkitRunnable {
             double minDist = plugin.getConfig().getDouble("checks.clip.min-dist", 1.0);
             if (dist > minDist && !graced && !special) {
                 var w = player.getWorld();
+                // Clip-dedicated scan: no endpoint-cell skip, 0.1 step, full
+                // body height — catches medium (10–20 block) clips the old
+                // rayBlocked-based test silently missed.
                 boolean through =
-                        CollisionEngine.rayBlocked(w, s.prevX, s.prevY + 0.9, s.prevZ, x, y + 0.9, z)
-                     || CollisionEngine.rayBlocked(w, s.prevX, s.prevY + 0.1, s.prevZ, x, y + 0.1, z);
+                        CollisionEngine.solidOnSegment(w, s.prevX, s.prevY, s.prevZ, x, y, z);
                 if (through) {
                     d.clipSeq++;
                     d.clipDetail = String.format(
