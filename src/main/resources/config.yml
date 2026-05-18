@@ -153,6 +153,10 @@ checks:
     min-streak: 4
 
   # ── COMBAT (reconstructed-position raytrace + aim) ──
+  # Lag-compensated: takes the SMALLEST eye→hitbox distance over the victim's
+  # positions within lag-window-ms (only flags if out of reach for ALL of
+  # them) + recon-slack for eye-reconstruction error. This removes the
+  # killaura-range false positives.
   reach:
     enabled: true
     max-violations: 12
@@ -160,9 +164,11 @@ checks:
     ban-duration: 14d
     max-reach: 3.0
     max-jitter-slack: 0.5
+    recon-slack: 0.30
+    lag-window-ms: 200
     score-scale: 18.0
     threshold: 9.0
-    min-streak: 3
+    min-streak: 4
 
   # Lag-compensated: victim hitbox rewound to the attack instant, so the
   # angular gate is tight (5°) and catches a small hitbox-expander. The wider
@@ -275,6 +281,10 @@ checks:
 
   # ── Additional movement checks ──
   clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1 }
+  # Clip / phase-teleport — Meteor .vclip/.hclip/.tp & anything moving THROUGH
+  # solid with no server teleport. Evaluated before the >8 reset that used to
+  # discard it. Conclusive → confirms immediately + rubber-bands.
+  clip:         { enabled: true, max-violations: 6,  punishment: kick, ban-duration: 30d, min-dist: 1.0, score: 15.0, threshold: 9.0, min-streak: 1 }
   blink:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-frames-per-tick: 9, score-scale: 3.0, threshold: 9.0, min-streak: 2 }
   jesus:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-dy: 0.12, min-speed: 0.08, score: 5.0, threshold: 12.0, min-streak: 6 }
   spider:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, min-up: 0.02, min-air-ticks: 4, score: 5.0, threshold: 10.0, min-streak: 5 }
@@ -315,6 +325,12 @@ checks:
   # Uses PRECISE simGround + a real-fall exclusion so legit jump/air crits
   # never flag — only a hop that never leaves the ground and never falls.
   criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, max-fall: 0.20, score: 4.0, threshold: 10.0, min-streak: 5 }
+  # Mace smash exploit — claimed airborne (to earn the fall bonus) while server
+  # geometry shows grounded with no real descent. Legit jump-smash never flags.
+  mace:         { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, window-ticks: 6, min-fall-dy: 0.25, score: 6.0, threshold: 10.0, min-streak: 3 }
+  # Auto shield-disable (NoShield/auto-axe): swap → hit → swap-back at machine-
+  # consistent cadence. Conservative: needs many low-variance samples.
+  shieldbypass: { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, swap-window-ms: 220, sample-cap: 30, min-samples: 8, max-sd-ms: 35.0, max-mean-ms: 320.0, score: 7.0, threshold: 10.0, min-streak: 3 }
   # Honeypot — two invisible trap entities next to a player in a PvP context:
   # an ArmorStand (catches all-entity/mob auras) AND, when fake-player:true, a
   # packet-level GHOST PLAYER sent only to that client (catches players-only
@@ -331,6 +347,9 @@ checks:
   # client outs itself (meteor-client, wurst, liquidbounce, …); vanilla and
   # legit mods never use these. Immediate, ~0 FP.
   cheatclient:  { enabled: true, max-violations: 1, punishment: kick, ban-duration: permanent, score: 20.0, threshold: 9.0, min-streak: 1 }
+  # MultiTask — >=2 attacks inside one uninterrupted item-use (eat/block/bow
+  # while attacking). Vanilla-impossible; near-zero FP.
+  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-attacks-in-use: 2, use-stale-ms: 5000, score: 6.0, threshold: 9.0, min-streak: 2 }
   inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
   # Counts swaps bound to the SAME reconstructed tick (vanilla sends <=1/tick,
   # so mashing F can never trip it — only an injected flood can).
@@ -338,8 +357,9 @@ checks:
   multiplace:   { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, window-ns: 70000000, max-places-per-tick: 3, score-scale: 4.0, threshold: 10.0, min-streak: 2 }
   # Time-aligned to the EXACT place tick + real clicked FACE (not the loose
   # live-eye/block-centre the old version used).
-  # max-angle raised (recon. eye lags a flick-down place); cadence only
-  # CORROBORATES an aim-off/backward place now (rhythmic bridging is human).
-  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 78.0, max-reach: 5.2, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
+  # Look now comes from the netty-accurate rotation stamped on the place
+  # packet (no longer a lagged frame), so a tight max-angle is safe again;
+  # cadence only CORROBORATES an aim-off/backward place (rhythmic = human).
+  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 65.0, max-reach: 5.5, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
   # AutoWeb — automatic cobweb placement on/around an opponent in combat.
   autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, attack-window-ticks: 4, combat-radius: 5.0, max-angle: 55.0, aim-score: 6.0, combat-score: 5.0, sample-cap: 20, min-samples: 6, max-sd-interval: 0.9, cadence-score: 6.0, threshold: 10.0, min-streak: 3 }
