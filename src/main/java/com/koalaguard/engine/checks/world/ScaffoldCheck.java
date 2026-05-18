@@ -92,7 +92,7 @@ public final class ScaffoldCheck extends SimCheck {
             double dot = (look.getX() * tx + look.getY() * ty + look.getZ() * tz) / dist;
             double angle = Math.toDegrees(Math.acos(MathUtil.clampD(dot, -1, 1)));
 
-            boolean aimOff = angle > cfgD("max-angle", 60.0);
+            boolean aimOff = angle > cfgD("max-angle", 78.0);
             if (aimOff) {
                 bad += cfgD("aim-score", 5.0);
                 why.append(String.format("place @%.0f,%.0f,%.0f aim-off %.0f° ",
@@ -132,20 +132,23 @@ public final class ScaffoldCheck extends SimCheck {
         }
         s.lastSeq = maxSeen;
 
-        // S2 — machine cadence with near-constant pitch.
-        if (s.intervals.size() >= cfgI("min-samples", 8)) {
+        // S2 — machine cadence ONLY CORROBORATES. Humans bridge rhythmically
+        // and hold a steady downward pitch, so cadence on its own false-flags
+        // legit fast bridging. It now adds nothing unless an aim-off /
+        // backward-bridge place was ALSO seen this pass (bad > 0).
+        if (bad > 0 && s.intervals.size() >= cfgI("min-samples", 10)) {
             double sdIv = MathUtil.standardDeviation(s.intervals);
             double sdPitch = MathUtil.standardDeviation(s.pitches);
-            if (sdIv < cfgD("max-sd-interval", 0.85)
-                    && sdPitch < cfgD("max-sd-pitch", 1.2)) {
-                bad += cfgD("cadence-score", 6.0);
+            if (sdIv < cfgD("max-sd-interval", 0.6)
+                    && sdPitch < cfgD("max-sd-pitch", 0.8)) {
+                bad += cfgD("cadence-score", 4.0);
                 why.append(String.format("machine cadence sdIv=%.2f sdPitch=%.2f n=%d ",
                         sdIv, sdPitch, s.intervals.size()));
             }
         }
 
         if (bad > 0) {
-            diverge(ctx, bad, cfgD("threshold", 11.0), cfgI("min-streak", 3),
+            diverge(ctx, bad, cfgD("threshold", 11.0), cfgI("min-streak", 4),
                     "scaffold :: " + why.toString().trim(), false);
         } else {
             clean(ctx, 0.5);
