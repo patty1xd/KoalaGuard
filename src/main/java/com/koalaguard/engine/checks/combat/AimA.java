@@ -65,8 +65,12 @@ public final class AimA extends SimCheck {
 
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
             double[] el = Combat.eyeLook(f, ctx.player);
-            double err = Combat.aimAngle(el[0], el[1], el[2],
-                    (float) el[3], (float) el[4], victim);
+            // Victim rewound to the attack instant when we have it (accurate),
+            // else the live hitbox (still safe — the threshold is huge).
+            double[] box = ctx.state.targets.boxAt(p.intA, p.recvNanos);
+            double err = box != null
+                    ? Combat.aimAngle(el[0], el[1], el[2], (float) el[3], (float) el[4], box)
+                    : Combat.aimAngle(el[0], el[1], el[2], (float) el[3], (float) el[4], victim);
 
             if (err > maxFov) {
                 flagged = true;

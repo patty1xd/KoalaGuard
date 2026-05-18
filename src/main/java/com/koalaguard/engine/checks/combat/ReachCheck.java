@@ -37,13 +37,18 @@ public final class ReachCheck extends SimCheck {
         seen.put(id, atk);
         if (ctx.unstableBasic()) return;
 
-        Entity victim = Combat.resolveById(ctx.player,
-                ctx.state.combat.lastAttackEntityId, 8.0);
+        int vid = ctx.state.combat.lastAttackEntityId;
+        Entity victim = Combat.resolveById(ctx.player, vid, 8.0);
         if (victim == null) return;
 
         PositionFrame f = ctx.state.frameAtOrBefore(atk);
         double[] eye = Combat.eyeLook(f, ctx.player);
-        double dist = Combat.distanceToBox(eye[0], eye[1], eye[2], victim);
+        // Lag compensation: the victim hitbox rewound to the attack instant —
+        // a reach hack can no longer hide behind the victim lagging toward us.
+        double[] box = ctx.state.targets.boxAt(vid, ctx.state.combat.lastAttackNanos);
+        double dist = box != null
+                ? Combat.distanceToBox(eye[0], eye[1], eye[2], box)
+                : Combat.distanceToBox(eye[0], eye[1], eye[2], victim);
 
         double base = cfgD("max-reach", 3.0);
         double tol = Math.min(cfgD("max-jitter-slack", 0.5),

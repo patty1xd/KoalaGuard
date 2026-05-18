@@ -62,13 +62,24 @@ public final class AimB extends SimCheck {
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
             double[] el = Combat.eyeLook(f, ctx.player);
             double ex = el[0], ey = el[1], ez = el[2];
-            double dist = Combat.distanceToBox(ex, ey, ez, victim);
+
+            double[] box = ctx.state.targets.boxAt(p.intA, p.recvNanos);
+            double cx, cy, cz, dist;
+            if (box != null) {
+                dist = Combat.distanceToBox(ex, ey, ez, box);
+                cx = (box[0] + box[3]) / 2.0;
+                cy = (box[1] + box[4]) / 2.0;
+                cz = (box[2] + box[5]) / 2.0;
+            } else {
+                dist = Combat.distanceToBox(ex, ey, ez, victim);
+                BoundingBox b = victim.getBoundingBox();
+                cx = b.getCenterX(); cy = b.getCenterY(); cz = b.getCenterZ();
+            }
             if (dist < minDist) continue;                    // corner/edge case
             any = true;
 
-            BoundingBox b = victim.getBoundingBox();
             if (CollisionEngine.rayBlocked(ctx.player.getWorld(), ex, ey, ez,
-                    b.getCenterX(), b.getCenterY(), b.getCenterZ())) {
+                    cx, cy, cz)) {
                 flagged = true;
                 if (diverge(ctx, cfgD("score", 5.0), cfgD("threshold", 9.0),
                         cfgI("min-streak", 3),

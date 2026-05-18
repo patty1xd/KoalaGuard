@@ -42,20 +42,34 @@ public final class HitValidationCheck extends SimCheck {
         seen.put(id, atk);
         if (ctx.unstableBasic()) return;
 
-        Entity victim = Combat.resolveById(ctx.player,
-                ctx.state.combat.lastAttackEntityId, 8.0);
+        int vid = ctx.state.combat.lastAttackEntityId;
+        Entity victim = Combat.resolveById(ctx.player, vid, 8.0);
         if (victim == null) return;
 
         PositionFrame f = ctx.state.frameAtOrBefore(atk);
         double[] eye = Combat.eyeLook(f, ctx.player);
 
-        double angle = Combat.aimAngle(eye[0], eye[1], eye[2],
-                (float) eye[3], (float) eye[4], victim);
-        double dist = Math.max(0.5, Combat.distanceToBox(eye[0], eye[1], eye[2], victim));
-        BoundingBox b = victim.getBoundingBox();
-        double radius = Math.max(b.getWidthX(), b.getHeight()) / 2.0 + 0.10;
-        double maxAngle = Math.toDegrees(Math.atan2(radius, dist))
-                + cfgD("angle-slack-deg", 9.0);
+        // Lag-compensated victim hitbox (rewound to the attack instant). With
+        // the accurate box the angular gate is tight enough to catch a small
+        // HITBOX-EXPANDER / slightly-off silent aim that the old 9° slack hid.
+        double[] box = ctx.state.targets.boxAt(vid, ctx.state.combat.lastAttackNanos);
+        double angle, dist, radius;
+        if (box != null) {
+            angle = Combat.aimAngle(eye[0], eye[1], eye[2],
+                    (float) eye[3], (float) eye[4], box);
+            dist = Math.max(0.5, Combat.distanceToBox(eye[0], eye[1], eye[2], box));
+            radius = Math.max(box[3] - box[0], box[4] - box[1]) / 2.0 + 0.10;
+        } else {
+            angle = Combat.aimAngle(eye[0], eye[1], eye[2],
+                    (float) eye[3], (float) eye[4], victim);
+            dist = Math.max(0.5, Combat.distanceToBox(eye[0], eye[1], eye[2], victim));
+            BoundingBox b = victim.getBoundingBox();
+            radius = Math.max(b.getWidthX(), b.getHeight()) / 2.0 + 0.10;
+        }
+        double slack = box != null
+                ? cfgD("angle-slack-deg", 5.0)                       // accurate
+                : cfgD("angle-slack-deg", 5.0) + cfgD("fallback-extra-slack-deg", 6.0);
+        double maxAngle = Math.toDegrees(Math.atan2(radius, dist)) + slack;
 
         boolean swung = ctx.state.log.existsSinceTick(
                 atk - cfgI("swing-window-ticks", 4),
