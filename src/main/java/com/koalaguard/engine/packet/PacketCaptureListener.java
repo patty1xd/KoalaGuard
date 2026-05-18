@@ -61,6 +61,8 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 p.hasRot = true;
                 p.yaw = w.getLocation().getYaw();
                 p.pitch = w.getLocation().getPitch();
+                s.netYaw = p.yaw;
+                s.netPitch = p.pitch;
             }
             if (w.hasPositionChanged()) {
                 p.hasPos = true;
@@ -141,6 +143,10 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 bp.strA = String.valueOf(w.getFace());   // BlockFace toward placement
                 bp.hasPos = true;
             } catch (Throwable ignored) { }
+            // True client look at place time (block-place packets carry none).
+            bp.yaw = s.netYaw;
+            bp.pitch = s.netPitch;
+            bp.hasRot = true;
             offer(s, bp);
             return;
         }
