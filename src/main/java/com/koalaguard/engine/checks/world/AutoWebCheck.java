@@ -95,7 +95,9 @@ public final class AutoWebCheck extends SimCheck {
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
             double[] el = Combat.eyeLook(f, ctx.player);
             double ex = el[0], ey = el[1], ez = el[2];
-            Vector look = Combat.lookVector((float) el[3], (float) el[4]);
+            Vector look = p.hasRot
+                    ? Combat.lookVector(p.yaw, p.pitch)
+                    : Combat.lookVector((float) el[3], (float) el[4]);
 
             double tx = p.x + 0.5 - ex, ty = p.y + 0.5 - ey, tz = p.z + 0.5 - ez;
             double dist = Math.sqrt(tx * tx + ty * ty + tz * tz);

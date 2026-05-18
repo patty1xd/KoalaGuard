@@ -74,11 +74,16 @@ public final class ScaffoldCheck extends SimCheck {
             if (p.seq > maxSeen) maxSeen = p.seq;
             if (p.seq <= s.lastSeq) continue;
 
-            // Reconstruct eye/look at the EXACT place tick.
+            // Eye POSITION from the reconstructed frame; LOOK from the actual
+            // netty-current rotation stamped on the place packet (block-place
+            // carries no rotation, and a lagged frame rotation was THE scaffold
+            // false-positive source — a quick flick-down place read as aim-off).
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
             double[] el = Combat.eyeLook(f, ctx.player);
             double ex = el[0], ey = el[1], ez = el[2];
-            Vector look = Combat.lookVector((float) el[3], (float) el[4]);
+            Vector look = p.hasRot
+                    ? Combat.lookVector(p.yaw, p.pitch)
+                    : Combat.lookVector((float) el[3], (float) el[4]);
 
             // The clicked FACE point, not the block centre.
             double[] n = faceNormal(p.strA);
