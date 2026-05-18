@@ -325,9 +325,12 @@ checks:
   # Uses PRECISE simGround + a real-fall exclusion so legit jump/air crits
   # never flag — only a hop that never leaves the ground and never falls.
   criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, max-fall: 0.20, score: 4.0, threshold: 10.0, min-streak: 5 }
-  # Mace smash exploit — claimed airborne (to earn the fall bonus) while server
-  # geometry shows grounded with no real descent. Legit jump-smash never flags.
-  mace:         { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, window-ticks: 6, min-fall-dy: 0.25, score: 6.0, threshold: 10.0, min-streak: 3 }
+  # Mace smash exploit — a SMASH-magnitude hit (server-computed damage above
+  # vanilla-max-damage) with no genuine fall by EITHER the server's own fall
+  # view or the geometric reconstruction. Legit jump/air smash always has a
+  # real fall -> never flags; a normal grounded mace hit never reaches smash
+  # damage -> never flags. Works while standing perfectly still.
+  mace:         { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, vanilla-max-damage: 25.0, min-fall-blocks: 1.0, window-ticks: 8, min-fall-dy: 0.25, score: 8.0, threshold: 10.0, min-streak: 2 }
   # Auto shield-disable (NoShield/auto-axe): swap → hit → swap-back at machine-
   # consistent cadence. Conservative: needs many low-variance samples.
   shieldbypass: { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, swap-window-ms: 220, sample-cap: 30, min-samples: 8, max-sd-ms: 35.0, max-mean-ms: 320.0, score: 7.0, threshold: 10.0, min-streak: 3 }
@@ -349,7 +352,7 @@ checks:
   cheatclient:  { enabled: true, max-violations: 1, punishment: kick, ban-duration: permanent, score: 20.0, threshold: 9.0, min-streak: 1 }
   # MultiTask — >=2 attacks inside one uninterrupted item-use (eat/block/bow
   # while attacking). Vanilla-impossible; near-zero FP.
-  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-attacks-in-use: 2, use-stale-ms: 5000, score: 6.0, threshold: 9.0, min-streak: 2 }
+  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-attacks-in-use: 2, use-stale-ms: 30000, score: 6.0, threshold: 9.0, min-streak: 2 }
   inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
   # Counts swaps bound to the SAME reconstructed tick (vanilla sends <=1/tick,
   # so mashing F can never trip it — only an injected flood can).
