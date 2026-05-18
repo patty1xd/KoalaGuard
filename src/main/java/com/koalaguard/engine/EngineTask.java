@@ -58,6 +58,10 @@ public final class EngineTask extends BukkitRunnable {
 
             refreshEnvironment(player, s);
             refreshInventory(player, s);
+            // Combat lag-compensation: snapshot nearby hitboxes so aim checks
+            // can rewind the victim to the attack instant.
+            s.targets.snapshot(System.nanoTime(),
+                    player.getNearbyEntities(14, 14, 14));
 
             boolean evaluate = !s.exSpectator && !s.exDead;
 

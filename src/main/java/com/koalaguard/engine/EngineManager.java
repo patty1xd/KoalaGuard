@@ -7,7 +7,11 @@ import com.koalaguard.engine.checks.combat.AimB;
 import com.koalaguard.engine.checks.combat.AimC;
 import com.koalaguard.engine.checks.combat.AimD;
 import com.koalaguard.engine.checks.combat.AimE;
+import com.koalaguard.engine.checks.combat.AimF;
+import com.koalaguard.engine.checks.combat.AimG;
+import com.koalaguard.engine.checks.combat.AimH;
 import com.koalaguard.engine.checks.combat.AutoClickerCheck;
+import com.koalaguard.engine.checks.combat.HoneypotCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
@@ -36,6 +40,7 @@ import com.koalaguard.engine.checks.movement.PhaseCheck;
 import com.koalaguard.engine.checks.movement.PredictionCheck;
 import com.koalaguard.engine.checks.movement.SpiderCheck;
 import com.koalaguard.engine.checks.movement.TimerCheck;
+import com.koalaguard.engine.checks.player.CheatClientCheck;
 import com.koalaguard.engine.checks.player.InventoryActionCheck;
 import com.koalaguard.engine.checks.player.OffhandCrashCheck;
 import com.koalaguard.engine.checks.world.AutoWebCheck;
@@ -96,6 +101,10 @@ public final class EngineManager {
         add(new AimC(plugin));
         add(new AimD(plugin));
         add(new AimE(plugin));
+        add(new AimF(plugin));
+        add(new AimG(plugin));
+        add(new AimH(plugin));
+        add(new HoneypotCheck(plugin));
 
         // ── Inventory: interaction-chain state machines ──
         add(new InventoryChainCheck(plugin));
@@ -112,6 +121,7 @@ public final class EngineManager {
         add(new AutoTotemF(plugin));
 
         // ── Player / World ──
+        add(new CheatClientCheck(plugin));
         add(new InventoryActionCheck(plugin));
         add(new OffhandCrashCheck(plugin));
         add(new NukerCheck(plugin));
