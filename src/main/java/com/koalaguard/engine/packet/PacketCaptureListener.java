@@ -132,7 +132,16 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
         }
 
         if (type == PacketType.Play.Client.PLAYER_BLOCK_PLACEMENT) {
-            offer(s, new CapturedPacket(seq.getAndIncrement(), PacketKind.BLOCK_PLACE, nanos));
+            CapturedPacket bp = new CapturedPacket(seq.getAndIncrement(), PacketKind.BLOCK_PLACE, nanos);
+            try {
+                var w = new com.github.retrooper.packetevents.wrapper.play.client
+                        .WrapperPlayClientPlayerBlockPlacement(event);
+                var pos = w.getBlockPosition();          // clicked block
+                bp.x = pos.getX(); bp.y = pos.getY(); bp.z = pos.getZ();
+                bp.strA = String.valueOf(w.getFace());   // BlockFace toward placement
+                bp.hasPos = true;
+            } catch (Throwable ignored) { }
+            offer(s, bp);
             return;
         }
 
@@ -175,8 +184,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             try {
                 WrapperPlayClientPluginMessage w = new WrapperPlayClientPluginMessage(event);
                 String ch = w.getChannelName();
-                if (ch != null && (ch.equalsIgnoreCase("minecraft:brand") || ch.equalsIgnoreCase("MC|Brand"))) {
-                    byte[] data = w.getData();
+                if (ch == null) return;
+                String lcCh = ch.toLowerCase();
+                byte[] data = w.getData();
+
+                if (lcCh.equals("minecraft:brand") || lcCh.equals("mc|brand")) {
                     if (data != null && data.length > 0) {
                         String brand = new String(data, StandardCharsets.UTF_8)
                                 .replaceAll("[^\\x20-\\x7E]", "").trim();
@@ -188,11 +200,53 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                                     || lc.contains("xeltotem")) {
                                 d.flagBadBrand = true;
                             }
+                            String hit = matchCheat(lc);
+                            if (hit != null) {
+                                d.flagBadChannel = true;
+                                d.badChannel = "brand:" + hit;
+                            }
                         }
+                    }
+                    return;
+                }
+
+                // Layer 1 — cheat-client plugin channel fingerprint. The
+                // channel a client registers / talks on is a near-zero-FP
+                // identifier; vanilla and legit mods never use these.
+                String chHit = matchCheat(lcCh);
+                if (chHit != null) {
+                    d.flagBadChannel = true;
+                    d.badChannel = ch;
+                } else if ((lcCh.equals("minecraft:register") || lcCh.equals("register"))
+                        && data != null && data.length > 0) {
+                    // Payload is a list of channel names being registered
+                    // (NUL/space separated). contains() over the whole blob is
+                    // enough — separators do not matter for a substring match.
+                    String reg = new String(data, StandardCharsets.UTF_8).toLowerCase();
+                    String regHit = matchCheat(reg);
+                    if (regHit != null) {
+                        d.flagBadChannel = true;
+                        d.badChannel = regHit;
                     }
                 }
             } catch (Throwable ignored) { }
         }
+    }
+
+    /** Unambiguous cheat-client channel/brand identifiers (near-zero FP). */
+    private static final String[] CHEAT_IDS = {
+            "meteor", "wurst", "liquidbounce", "aristois", "rusherhack",
+            "impactclient", "future-client", "futureclient",
+            "salhack", "kamiblue", "kami-blue", "wwe-client", "sigma-client",
+            "novoline", "doomsday-client", "inertia-client", "rise-client",
+            "nodus", "huzuni", "flux-client", "vapeclient", "vape-client",
+            "entropy-client", "raven-b4"
+    };
+
+    private static String matchCheat(String s) {
+        if (s == null || s.isEmpty()) return null;
+        for (String id : CHEAT_IDS) if (s.contains(id)) return id;
+        return null;
     }
 
     private void offer(PlayerState s, CapturedPacket p) {
