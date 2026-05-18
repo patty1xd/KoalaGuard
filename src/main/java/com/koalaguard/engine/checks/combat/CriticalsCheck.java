@@ -4,7 +4,6 @@ import com.koalaguard.KoalaGuard;
 import com.koalaguard.check.CheckCategory;
 import com.koalaguard.engine.check.CheckContext;
 import com.koalaguard.engine.check.SimCheck;
-import com.koalaguard.engine.sim.CollisionEngine;
 import com.koalaguard.engine.state.PositionFrame;
 
 import java.util.List;
@@ -41,25 +40,30 @@ public final class CriticalsCheck extends SimCheck {
         if (ctx.state.exVehicle || ctx.state.exClimbing || ctx.state.exLiquid
                 || ctx.state.exLevitation || ctx.state.exGliding || ctx.state.exWeb) return;
 
-        double h = ctx.player.isSneaking() ? 1.5 : 1.8;
         int win = cfgI("window-ticks", 4);
-        double maxUp = 0;
+        double maxUp = 0, maxDown = 0;
         boolean sawDown = false, leftGround = false, haveFrames = false;
         for (PositionFrame f : ctx.state.recentFrames(12)) {
             if (f.tick > atk || f.tick < atk - win) continue;
             haveFrames = true;
             maxUp = Math.max(maxUp, f.dy);
+            maxDown = Math.min(maxDown, f.dy);
             if (f.dy < -0.005) sawDown = true;
-            if (!CollisionEngine.nearGround(ctx.player.getWorld(), f.x, f.y, f.z, h))
-                leftGround = true;
+            // PRECISE ground: a real jump/air crit genuinely loses top-face
+            // support (simGround=false) on the arc — use that, NOT the lenient
+            // 1-block nearGround, which made legit low jump-crits false-flag.
+            if (!f.simGround) leftGround = true;
         }
         if (!haveFrames) return;
 
-        // A fake hop: small positive blip, a return down, never genuinely
-        // airborne. A real jump exceeds maxHop and leaves the ground.
+        // A FAKE hop is a tiny up-blip that returns down only slightly and
+        // NEVER actually leaves the ground. A real crit (jump OR from air)
+        // either leaves the ground or has a genuine fall (dy well below the
+        // micro range) — both exclude it here, so legit crits don't flag.
+        boolean realFall = maxDown < -cfgD("max-fall", 0.20);
         boolean phantom = maxUp >= cfgD("min-hop", 0.018)
                 && maxUp <= cfgD("max-hop", 0.15)
-                && sawDown && !leftGround;
+                && sawDown && !leftGround && !realFall;
 
         if (phantom) {
             diverge(ctx, cfgD("score", 4.0), cfgD("threshold", 10.0),
