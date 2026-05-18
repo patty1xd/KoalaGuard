@@ -56,6 +56,28 @@ public final class Combat {
         return Math.toDegrees(Math.acos(dot));
     }
 
+    // ───── lag-compensated variants: victim AABB rewound to attack time ─────
+    //  box = {minX,minY,minZ,maxX,maxY,maxZ}
+
+    public static double distanceToBox(double ex, double ey, double ez, double[] box) {
+        double dx = Math.max(Math.max(box[0] - ex, 0), ex - box[3]);
+        double dy = Math.max(Math.max(box[1] - ey, 0), ey - box[4]);
+        double dz = Math.max(Math.max(box[2] - ez, 0), ez - box[5]);
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    public static double aimAngle(double ex, double ey, double ez,
+                                  float yaw, float pitch, double[] box) {
+        Vector look = lookVector(yaw, pitch);
+        Vector to = new Vector((box[0] + box[3]) / 2.0 - ex,
+                               (box[1] + box[4]) / 2.0 - ey,
+                               (box[2] + box[5]) / 2.0 - ez);
+        if (to.lengthSquared() < 1e-7) return 0;
+        to.normalize();
+        double dot = Math.max(-1.0, Math.min(1.0, look.dot(to)));
+        return Math.toDegrees(Math.acos(dot));
+    }
+
     /** Reconstructed eye position for a stored movement frame. */
     public static double[] eyeOf(PositionFrame f, double eyeHeight) {
         return new double[]{ f.x, f.y + eyeHeight, f.z };
