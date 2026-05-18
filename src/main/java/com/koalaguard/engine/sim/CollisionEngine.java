@@ -128,6 +128,43 @@ public final class CollisionEngine {
     }
 
     /**
+     * Clip-dedicated path test. True if the straight segment the player moved
+     * along passes through (or ends inside) a collidable block.
+     *
+     * Why this exists separately from {@link #rayBlocked}: rayBlocked SKIPS the
+     * source and target block cells and samples at a coarse 0.2-block step at a
+     * single height — perfect for "is there a wall between me and who I clicked"
+     * but FATAL for clip detection. A 10–20 block .hclip/.vclip frequently has
+     * its wall inside the skipped endpoint cells (the cheat clips you to valid
+     * air just past a wall that is adjacent to your start), so rayBlocked read
+     * "clear" and the clip slipped through entirely. This test skips NOTHING,
+     * steps finely (0.1 block), and scans the whole player body height — a clip
+     * of even one block through a thin wall is caught, while an open lane (a
+     * legit fast move) still reads clear because no body-height sample is solid.
+     */
+    public static boolean solidOnSegment(World w,
+                                         double x0, double y0, double z0,
+                                         double x1, double y1, double z1) {
+        if (w == null) return false;
+        double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+        double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist < 0.10) return false;
+        int steps = (int) Math.ceil(dist / 0.10) + 1;
+        double[] heights = { 0.10, 0.90, 1.60 };   // feet, mid, head
+        for (int i = 0; i <= steps; i++) {
+            double t = (double) i / steps;
+            double cx = x0 + dx * t, cy = y0 + dy * t, cz = z0 + dz * t;
+            int bx = (int) Math.floor(cx);
+            int bz = (int) Math.floor(cz);
+            for (double hh : heights) {
+                int by = (int) Math.floor(cy + hh);
+                if (collidable(w.getBlockAt(bx, by, bz))) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * True if a full solid block obstructs the straight segment from the eye to
      * the target point. Stepped sampling (≈0.2 block) — coarse on purpose: it is
      * only used to catch combat / placement THROUGH a wall, never to grant a
