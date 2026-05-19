@@ -43,9 +43,18 @@ public final class SetbackManager {
         long now = System.currentTimeMillis();
         if (d.setbackPending) return;
         if (now - d.lastSetbackMs < 400) return;            // de-dupe burst
-        final Location to = d.lastValidLocation;
+        Location to = d.lastValidLocation;
+        if (to == null || to.getWorld() == null) {
+            // No recorded anchor (the player was never on a sim-valid ground
+            // frame before cheating — true for clip/fly/void where the cheat
+            // starts immediately). Fall back to solid ground beneath them so a
+            // setback ALWAYS happens instead of silently degrading to an
+            // alert-only flag.
+            to = groundBelow(p.getLocation());
+        }
         if (to == null || to.getWorld() == null) return;
 
+        final Location target = to;
         d.setbackPending = true;
         d.lastSetbackMs = now;
         d.setbackStreak++;
@@ -53,7 +62,7 @@ public final class SetbackManager {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             if (!p.isOnline() || !d.isAlive()) { d.setbackPending = false; return; }
             d.lastTeleportMs = System.currentTimeMillis();   // grace so the snap-back is ignored
-            Location safe = to.clone();
+            Location safe = target.clone();
             safe.setYaw(p.getLocation().getYaw());
             safe.setPitch(p.getLocation().getPitch());
             p.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
@@ -61,6 +70,26 @@ public final class SetbackManager {
             d.setbackPending = false;
             if (debug()) plugin.getLogger().info("[Setback] " + p.getName() + " -> " + reason);
         });
+    }
+
+    /**
+     * Scan straight down for the first solid block and return the standing
+     * spot on top of it. Used only as the no-anchor fallback so a setback is
+     * never silently skipped.
+     */
+    private Location groundBelow(Location from) {
+        if (from == null || from.getWorld() == null) return null;
+        Location l = from.clone();
+        int minY = from.getWorld().getMinHeight();
+        for (int i = 0; i < 64 && l.getBlockY() > minY; i++) {
+            Location below = l.clone().subtract(0, 1, 0);
+            if (below.getBlock().getType().isSolid()) {
+                l.setY(below.getBlockY() + 1.0);
+                return l;
+            }
+            l = below;
+        }
+        return null;
     }
 
     private boolean debug() {
