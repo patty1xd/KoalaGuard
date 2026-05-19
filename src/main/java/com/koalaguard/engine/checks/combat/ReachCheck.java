@@ -56,7 +56,6 @@ public final class ReachCheck extends SimCheck {
         // is out of reach even for the most favourable victim position. This
         // is what removes the killaura-range false positives: reconstruction
         // jitter (~0.2-0.4) no longer pushes a legit 3.0 hit over the limit.
-        long atkNs = ctx.state.combat.lastAttackNanos;
         long winNs = cfgL("lag-window-ms", 200L) * 1_000_000L;
         double dist = Double.MAX_VALUE;
         List<double[]> hist = ctx.state.targets.history(vid);
