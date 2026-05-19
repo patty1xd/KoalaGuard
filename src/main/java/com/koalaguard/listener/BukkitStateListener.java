@@ -230,5 +230,27 @@ public final class BukkitStateListener implements Listener {
             if (below == Material.SLIME_BLOCK) d.slimeBounceMs = now;
             if (below == Material.SLIME_BLOCK || below.name().endsWith("_BED")) d.lastSlimeOrBedMs = now;
         }
+
+        // Reliable setback anchor. Every movement setback rubber-bands to
+        // d.lastValidLocation; previously only the engine frame loop set it,
+        // and only on a ground-supported reconstructed frame — so checks that
+        // flag while airborne / clipping / teleporting (everything except
+        // Prediction, which flags during normal ground movement) found it null
+        // and the setback silently no-opped into an alert. Capture the last
+        // genuinely on-solid-ground server position here, from the
+        // authoritative move event, BEFORE any clip/teleport, outside grace.
+        if (!d.setbackPending
+                && now - d.lastTeleportMs   > 1500
+                && now - d.lastVelocityMs   > 1500
+                && now - d.lastRespawnMs    > 2500
+                && now - d.lastWorldChangeMs > 4000
+                && now - d.joinMs           > 3500
+                && !p.isFlying() && !p.isGliding() && !p.isInsideVehicle()
+                && !p.isInWater()) {
+            var to = event.getTo();
+            if (to.clone().subtract(0, 0.2, 0).getBlock().getType().isSolid()) {
+                d.lastValidLocation = to.clone();
+            }
+        }
     }
 }
