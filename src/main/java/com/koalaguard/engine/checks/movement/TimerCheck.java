@@ -59,7 +59,7 @@ public final class TimerCheck extends SimCheck {
         if (ratio > 1.0 + eps) {
             diverge(ctx, (ratio - 1.0) * cfgD("score-scale", 40.0),
                     cfgD("threshold", 10.0), cfgI("min-streak", 2),
-                    String.format("tick ratio %.3f over %d server ticks", ratio, window), false);
+                    String.format("tick ratio %.3f over %d server ticks", ratio, window), true);
         } else {
             clean(ctx, 3.0);
         }
