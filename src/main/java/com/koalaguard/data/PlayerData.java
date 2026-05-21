@@ -84,6 +84,12 @@ public final class PlayerData {
      *  persistent combat violation). */
     public volatile long combatCancelUntilMs;
 
+    /** While now < this, the netty layer drops this player's position-bearing
+     *  movement packets — set right after a setback so cheat packets queued
+     *  during the same tick (blink burst, backstab return) cannot immediately
+     *  undo the rubber-band before Mojang's processor sees them. */
+    public volatile long movementCancelUntilMs;
+
     private volatile boolean alive = true;
     public boolean isAlive() { return alive; }
     public void invalidate() { alive = false; }
