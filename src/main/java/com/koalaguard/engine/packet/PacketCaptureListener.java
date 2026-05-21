@@ -55,6 +55,12 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 || type == PacketType.Play.Client.PLAYER_ROTATION
                 || type == PacketType.Play.Client.PLAYER_POSITION_AND_ROTATION) {
             WrapperPlayClientPlayerFlying w = new WrapperPlayClientPlayerFlying(event);
+            // Movement-cancel window (set right after a setback): drop the
+            // position component so cheat packets already in the netty pipe
+            // cannot immediately undo the rubber-band. Rotation is left to
+            // pass — we don't want to lock the player's camera, and rotation
+            // alone can't take them off the setback anchor.
+            boolean dropPos = System.currentTimeMillis() < d.movementCancelUntilMs;
             CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.MOVEMENT, nanos);
             p.onGround = w.isOnGround();
             if (w.hasRotationChanged()) {
@@ -64,10 +70,13 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 s.netYaw = p.yaw;
                 s.netPitch = p.pitch;
             }
-            if (w.hasPositionChanged()) {
+            if (w.hasPositionChanged() && !dropPos) {
                 p.hasPos = true;
                 var pos = w.getLocation().getPosition();
                 p.x = pos.getX(); p.y = pos.getY(); p.z = pos.getZ();
+            }
+            if (dropPos && w.hasPositionChanged()) {
+                event.setCancelled(true);                 // Mojang never sees it
             }
             offer(s, p);
             return;
@@ -78,6 +87,13 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.INTERACT_ENTITY, nanos);
             p.intA = w.getEntityId();
             p.objA = w.getAction();   // InteractAction enum
+            // Stamp the true client rotation at attack-send time. The frame's
+            // yaw/pitch is FROZEN while a player only sends rotation-only +
+            // attack packets (no position frame is pushed), so aim checks that
+            // read the frame would see a stale rotation for stationary attacks.
+            p.yaw = s.netYaw;
+            p.pitch = s.netPitch;
+            p.hasRot = true;
             // Silent combat cancellation: a confirmed persistent combat
             // violation drops the attack so it never deals damage/knockback.
             if (w.getAction() == WrapperPlayClientInteractEntity.InteractAction.ATTACK
@@ -89,7 +105,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
         }
 
         if (type == PacketType.Play.Client.ANIMATION) {
-            offer(s, new CapturedPacket(seq.getAndIncrement(), PacketKind.ANIMATION, nanos));
+            CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.ANIMATION, nanos);
+            p.yaw = s.netYaw;
+            p.pitch = s.netPitch;
+            p.hasRot = true;
+            offer(s, p);
             return;
         }
 
@@ -122,6 +142,14 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             if (a == DiggingAction.RELEASE_USE_ITEM) s.usingItem = false;
             CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.DIGGING, nanos);
             p.strA = a.name();
+            // Block position is needed by FastBreak to match START with FINISH.
+            try {
+                var pos = w.getBlockPosition();
+                if (pos != null) {
+                    p.x = pos.getX(); p.y = pos.getY(); p.z = pos.getZ();
+                    p.hasPos = true;
+                }
+            } catch (Throwable ignored) { }
             offer(s, p);
             return;
         }
@@ -246,7 +274,16 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             "salhack", "kamiblue", "kami-blue", "wwe-client", "sigma-client",
             "novoline", "doomsday-client", "inertia-client", "rise-client",
             "nodus", "huzuni", "flux-client", "vapeclient", "vape-client",
-            "entropy-client", "raven-b4"
+            "entropy-client", "raven-b4",
+            // 2026 additions — observed brand/channel strings across paid +
+            // free clients. Substring match, so e.g. "lambda" catches every
+            // KAMI fork that kept the namespace.
+            "skidbounce", "opai-client", "opaiclient", "lambda-client", "lambda",
+            "sentience", "lifeware", "jello-client", "holyworld",
+            "dolphin-client", "polar-client", "sigma5", "sigma-5",
+            "fdp-client", "fdpclient", "cresent", "matrix-client",
+            "myau-client", "vape-v4", "memestware", "ratclient",
+            "celestial-client", "moonlight-client"
     };
 
     private static String matchCheat(String s) {
