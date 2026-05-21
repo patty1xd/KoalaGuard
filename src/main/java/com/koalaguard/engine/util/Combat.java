@@ -1,5 +1,6 @@
 package com.koalaguard.engine.util;
 
+import com.koalaguard.engine.packet.CapturedPacket;
 import com.koalaguard.engine.state.PositionFrame;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -91,10 +92,27 @@ public final class Combat {
      * stationary player IS the true position — so combat checks still run.
      */
     public static double[] eyeLook(PositionFrame f, Player p) {
+        return eyeLook(f, null, p);
+    }
+
+    /**
+     * Same as {@link #eyeLook(PositionFrame, Player)} but PREFERS the rotation
+     * stamped on {@code pkt} (true client look at the exact instant the packet
+     * was received on the netty thread). This is the right yaw/pitch to use for
+     * aim checks against an attack packet: the frame's yaw is FROZEN while a
+     * player stands still and only emits rotation-only + attack packets (no
+     * new position frame is pushed), so using the frame yaw silently sees a
+     * stale rotation for the entire stationary-aura test scenario.
+     */
+    public static double[] eyeLook(PositionFrame f, CapturedPacket pkt, Player p) {
         if (f != null) {
-            return new double[]{ f.x, f.y + eyeHeight(p), f.z, f.yaw, f.pitch };
+            float yaw   = (pkt != null && pkt.hasRot) ? pkt.yaw   : f.yaw;
+            float pitch = (pkt != null && pkt.hasRot) ? pkt.pitch : f.pitch;
+            return new double[]{ f.x, f.y + eyeHeight(p), f.z, yaw, pitch };
         }
         org.bukkit.Location l = p.getEyeLocation();
-        return new double[]{ l.getX(), l.getY(), l.getZ(), l.getYaw(), l.getPitch() };
+        float yaw   = (pkt != null && pkt.hasRot) ? pkt.yaw   : l.getYaw();
+        float pitch = (pkt != null && pkt.hasRot) ? pkt.pitch : l.getPitch();
+        return new double[]{ l.getX(), l.getY(), l.getZ(), yaw, pitch };
     }
 }
