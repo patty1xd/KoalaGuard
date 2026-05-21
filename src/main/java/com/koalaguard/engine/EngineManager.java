@@ -43,11 +43,14 @@ import com.koalaguard.engine.checks.movement.PhaseCheck;
 import com.koalaguard.engine.checks.movement.PredictionCheck;
 import com.koalaguard.engine.checks.movement.SpiderCheck;
 import com.koalaguard.engine.checks.movement.TimerCheck;
+import com.koalaguard.engine.checks.movement.VehicleFlyCheck;
 import com.koalaguard.engine.checks.player.CheatClientCheck;
 import com.koalaguard.engine.checks.player.InventoryActionCheck;
 import com.koalaguard.engine.checks.player.MultiTaskCheck;
 import com.koalaguard.engine.checks.player.OffhandCrashCheck;
+import com.koalaguard.engine.checks.world.AirPlaceCheck;
 import com.koalaguard.engine.checks.world.AutoWebCheck;
+import com.koalaguard.engine.checks.world.FastBreakCheck;
 import com.koalaguard.engine.checks.world.MultiPlaceCheck;
 import com.koalaguard.engine.checks.world.NukerCheck;
 import com.koalaguard.engine.checks.world.ScaffoldCheck;
@@ -90,6 +93,7 @@ public final class EngineManager {
         add(new JesusCheck(plugin));
         add(new SpiderCheck(plugin));
         add(new ElytraFlyCheck(plugin));
+        add(new VehicleFlyCheck(plugin));
 
         // ── Combat: reconstructed-position raytrace + aim plausibility ──
         add(new ReachCheck(plugin));
@@ -136,6 +140,8 @@ public final class EngineManager {
         add(new MultiPlaceCheck(plugin));
         add(new ScaffoldCheck(plugin));
         add(new AutoWebCheck(plugin));
+        add(new FastBreakCheck(plugin));
+        add(new AirPlaceCheck(plugin));
 
         plugin.getLogger().info("KoalaGuard engine: registered " + byName.size()
                 + " checks (" + frameChecks.size() + " per-frame, "

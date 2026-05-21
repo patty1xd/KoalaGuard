@@ -234,6 +234,11 @@ public final class EngineTask extends BukkitRunnable {
                     s.combat.lastAttackEntityId = p.intA;
                     s.combat.lastAttackTick = s.tick;
                     s.combat.lastAttackNanos = p.recvNanos;
+                    s.combat.lastAttackHasRot = p.hasRot;
+                    if (p.hasRot) {
+                        s.combat.lastAttackYaw = p.yaw;
+                        s.combat.lastAttackPitch = p.pitch;
+                    }
                 }
             }
             case ANIMATION -> s.combat.lastSwingTick = s.tick;
