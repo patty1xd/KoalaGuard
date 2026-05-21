@@ -38,7 +38,19 @@ public final class SetbackManager {
         }
     }
 
-    /** Teleport the player back to the last valid spot (main thread). */
+    /**
+     * Teleport the player back to the last valid spot.
+     *
+     * Critical: this runs SYNCHRONOUSLY when called on the main thread (the
+     * engine-driven checks always are). The previous version deferred via
+     * scheduler.runTask, leaving one full tick in which the cheat's already-
+     * queued packets (the attack behind a shield, the next blink frame, etc.)
+     * reached Mojang's handler BEFORE the rubber-band ran — that's why only
+     * Prediction "felt" the setback (long persistent cheat) while ClickTp /
+     * Blink / Phase / Backstab setbacks looked like they did nothing. We also
+     * drop the player's pending velocity and force a movement-cancel window
+     * so any post-teleport packets in flight are ignored by the netty layer.
+     */
     public void requestSetback(PlayerData d, Player p, String reason) {
         long now = System.currentTimeMillis();
         if (d.setbackPending) return;
@@ -59,17 +71,33 @@ public final class SetbackManager {
         d.lastSetbackMs = now;
         d.setbackStreak++;
 
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
+        Runnable runTeleport = () -> {
             if (!p.isOnline() || !d.isAlive()) { d.setbackPending = false; return; }
             d.lastTeleportMs = System.currentTimeMillis();   // grace so the snap-back is ignored
+            // Drop the inbound packet pipeline for a short window so any
+            // already-queued cheat packets the netty layer holds (blink burst,
+            // post-clip frame, backstab return) are discarded instead of
+            // immediately undoing the teleport.
+            d.movementCancelUntilMs = System.currentTimeMillis()
+                    + plugin.getConfig().getLong("enforcement.movement-cancel-ms", 350L);
+            d.combatCancelUntilMs = Math.max(d.combatCancelUntilMs,
+                    d.movementCancelUntilMs);
             Location safe = target.clone();
             safe.setYaw(p.getLocation().getYaw());
             safe.setPitch(p.getLocation().getPitch());
             p.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
             p.teleport(safe);
+            d.engine.moveInit = false;
+            d.engine.intake.clear();
             d.setbackPending = false;
             if (debug()) plugin.getLogger().info("[Setback] " + p.getName() + " -> " + reason);
-        });
+        };
+
+        if (plugin.getServer().isPrimaryThread()) {
+            runTeleport.run();
+        } else {
+            plugin.getServer().getScheduler().runTask(plugin, runTeleport);
+        }
     }
 
     /**
