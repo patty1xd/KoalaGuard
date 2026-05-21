@@ -71,7 +71,30 @@ public final class ReachCheck extends SimCheck {
                     : Combat.distanceToBox(eye[0], eye[1], eye[2], victim);
         }
 
+        // 1.20.5+ added the per-player `entity_interaction_range` attribute,
+        // which servers can raise via gear / permission plugins. Reading it
+        // here means our cap respects whatever the SERVER has decided is
+        // legitimate for this player — preventing false reach flags on
+        // servers that hand out extended-reach perks. Falls back to the
+        // vanilla 3.0 when the attribute / API is missing.
         double base = cfgD("max-reach", 3.0);
+        try {
+            org.bukkit.attribute.AttributeInstance attr = null;
+            try { attr = ctx.player.getAttribute(
+                    org.bukkit.attribute.Attribute.PLAYER_ENTITY_INTERACTION_RANGE); }
+            catch (Throwable t1) {
+                try {
+                    org.bukkit.attribute.Attribute a = org.bukkit.Registry.ATTRIBUTE.get(
+                            org.bukkit.NamespacedKey.minecraft("entity_interaction_range"));
+                    if (a != null) attr = ctx.player.getAttribute(a);
+                } catch (Throwable ignored) { }
+            }
+            if (attr != null) {
+                double v = attr.getValue();
+                if (v > base) base = v;                 // never lower than the configured floor
+            }
+        } catch (Throwable ignored) { }
+
         double tol = Math.min(cfgD("max-jitter-slack", 0.5),
                 ctx.lag().toleranceTicks() * 0.03)
                 + cfgD("recon-slack", 0.30);            // eye-reconstruction error

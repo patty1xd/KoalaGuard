@@ -60,7 +60,7 @@ public final class AimB extends SimCheck {
             if (!(victim instanceof LivingEntity) || victim == ctx.player) continue;
 
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
-            double[] el = Combat.eyeLook(f, ctx.player);
+            double[] el = Combat.eyeLook(f, p, ctx.player);
             double ex = el[0], ey = el[1], ez = el[2];
 
             double[] box = ctx.state.targets.boxAt(p.intA, p.recvNanos);

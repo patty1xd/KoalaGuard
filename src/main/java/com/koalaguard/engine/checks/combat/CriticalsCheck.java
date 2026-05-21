@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class CriticalsCheck extends SimCheck {
 
     private final Map<UUID, Long> seen = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> seenCap = new ConcurrentHashMap<>();
 
     public CriticalsCheck(KoalaGuard plugin) {
         super(plugin, "criticals", CheckCategory.COMBAT, "Faked critical hit");
@@ -31,6 +32,23 @@ public final class CriticalsCheck extends SimCheck {
 
     @Override
     public void onTick(CheckContext ctx) {
+        // ── Variant 1: damage-time PREVENTION. The HIGHEST-priority handler
+        // already stripped the crit multiplier on attacks where the server
+        // believed a fall happened but the engine's collision truth said
+        // grounded — this catches every cheat variant (NoGround/Packet/Mini-
+        // Jump/Blink/Timer) at the damage edge, not via packet pattern.
+        long capNs = ctx.state.combat.lastFakeCritNanos;
+        UUID id0 = ctx.data.getUuid();
+        if (capNs > Long.MIN_VALUE / 2 && seenCap.getOrDefault(id0, Long.MIN_VALUE) != capNs) {
+            seenCap.put(id0, capNs);
+            if (diverge(ctx, cfgD("cap-score", 8.0), cfgD("threshold", 10.0),
+                    cfgI("cap-min-streak", 1),
+                    "fake crit (no real fall) :: " + ctx.state.combat.lastFakeCritDetail,
+                    false)) {
+                armCombatCancel(ctx);
+            }
+        }
+
         long atk = ctx.state.combat.lastAttackTick;
         if (atk < 0) return;
         // Dedupe on unique attack-nanos, not the (stationary-frozen) tick.

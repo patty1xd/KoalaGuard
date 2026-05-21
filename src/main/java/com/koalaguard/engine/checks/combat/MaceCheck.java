@@ -38,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class MaceCheck extends SimCheck {
 
     private final Map<UUID, Long> seen = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> seenCap = new ConcurrentHashMap<>();
 
     public MaceCheck(KoalaGuard plugin) {
         super(plugin, "mace", CheckCategory.COMBAT, "Faked mace smash (no real fall)");
@@ -45,6 +46,21 @@ public final class MaceCheck extends SimCheck {
 
     @Override
     public void onTick(CheckContext ctx) {
+        // ── Variant 1: the HARD CAP at HIGHEST priority already truncated an
+        // over-the-cap mace hit to vanilla damage — surface that as a flag so
+        // staff see what was prevented. Single occurrence = conclusive (the
+        // cap re-computes from world geometry, not the spoofable fallDistance).
+        long capNs = ctx.state.combat.lastMaceCapPreventedNanos;
+        UUID id0 = ctx.data.getUuid();
+        if (capNs > Long.MIN_VALUE / 2 && seenCap.getOrDefault(id0, Long.MIN_VALUE) != capNs) {
+            seenCap.put(id0, capNs);
+            if (diverge(ctx, cfgD("cap-score", 10.0), cfgD("threshold", 10.0),
+                    cfgI("cap-min-streak", 1),
+                    "mace smash damage cap fired (no real fall)", false)) {
+                armCombatCancel(ctx);
+            }
+        }
+
         long hitNs = ctx.state.combat.lastMaceHitNanos;
         if (hitNs <= Long.MIN_VALUE / 2) return;             // no mace hit yet
         UUID id = ctx.data.getUuid();

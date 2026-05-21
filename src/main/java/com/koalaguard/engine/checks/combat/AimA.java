@@ -64,7 +64,7 @@ public final class AimA extends SimCheck {
             any = true;
 
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
-            double[] el = Combat.eyeLook(f, ctx.player);
+            double[] el = Combat.eyeLook(f, p, ctx.player);
             // Victim rewound to the attack instant when we have it (accurate),
             // else the live hitbox (still safe — the threshold is huge).
             double[] box = ctx.state.targets.boxAt(p.intA, p.recvNanos);

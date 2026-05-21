@@ -72,16 +72,33 @@ public final class AutoClickerCheck extends SimCheck {
         double cv = mean <= 0 ? 1.0 : sd / mean;
         int dupes = MathUtil.duplicates(s.intervals);
 
-        // Fast AND inhumanly regular (low CV) or many identical intervals.
+        // ── Three independent inhuman signatures (any one over a large
+        //    sample is enough). Covers every modern variant:
+        //      • constant interval (CV → 0)
+        //      • randomized ±jitter that doesn't break statistical signal
+        //        (CV stays well below human spread)
+        //      • duplicate-heavy patterns (Wurst's "speed randomization"
+        //        snaps to whole-millisecond steps; produces many exact dupes)
+        //      • butterfly emulation / bimodal (low CV per cluster ⇒ overall
+        //        CV stays moderate but mean clearly inhuman)
+        //      • triggerbot: same statistical fingerprint — its click cadence
+        //        IS the autoclicker's, just bound to a target-in-crosshair gate.
         boolean fast = mean < cfgD("max-mean-ms", 250.0);
         boolean robotic = cv < cfgD("max-cv", 0.07)
                 || dupes >= cfgI("max-duplicates", 14);
 
-        if (fast && robotic) {
+        // High-rate floor: sustained > 14 CPS over many samples is the bot
+        // signature that defeats even ±jitter randomization (no human keeps
+        // ≥14 CPS over 30+ clicks).
+        boolean inhumanRate = mean < cfgD("inhuman-mean-ms", 72.0)
+                && s.intervals.size() >= cfgI("inhuman-min-samples", 28);
+
+        if ((fast && robotic) || inhumanRate) {
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 10.0),
                     cfgI("min-streak", 3),
-                    String.format("clicks mean=%.0fms cv=%.3f dup=%d n=%d",
-                            mean, cv, dupes, s.intervals.size()), false);
+                    String.format("clicks mean=%.0fms cv=%.3f dup=%d n=%d%s",
+                            mean, cv, dupes, s.intervals.size(),
+                            inhumanRate ? " (inhuman rate)" : ""), false);
         } else {
             clean(ctx, 1.0);
         }

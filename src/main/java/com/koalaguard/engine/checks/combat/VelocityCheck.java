@@ -24,7 +24,9 @@ public final class VelocityCheck extends SimCheck {
         long kbTick = Long.MIN_VALUE;
         long evalTick;
         double expectedH, expectedY;
-        double peakH = 0, maxUp = 0;
+        double kbDirX, kbDirZ;            // unit vector along the kb direction
+        double peakAlong = 0, maxUp = 0;  // signed projection onto kb direction
+        double maxAgainst = 0;            // signed projection AGAINST kb (reversal)
     }
 
     private final Map<UUID, K> pend = new ConcurrentHashMap<>();
@@ -49,8 +51,15 @@ public final class VelocityCheck extends SimCheck {
                 k.evalTick = ctx.state.tick + cfgI("window-ticks", 6);
                 k.expectedH = exp[0];
                 k.expectedY = exp[1];
-                k.peakH = 0;
+                k.peakAlong = 0;
+                k.maxAgainst = 0;
                 k.maxUp = 0;
+                double mag = Math.sqrt(combat.pendingKnockback.getX() * combat.pendingKnockback.getX()
+                                     + combat.pendingKnockback.getZ() * combat.pendingKnockback.getZ());
+                if (mag > 1e-6) {
+                    k.kbDirX = combat.pendingKnockback.getX() / mag;
+                    k.kbDirZ = combat.pendingKnockback.getZ() / mag;
+                } else { k.kbDirX = 0; k.kbDirZ = 0; }
             }
         }
 
@@ -58,7 +67,13 @@ public final class VelocityCheck extends SimCheck {
 
         PositionFrame f = ctx.state.current;
         if (f != null && f.tick > k.kbTick) {
-            k.peakH = Math.max(k.peakH, f.horizontalSpeed());
+            // SIGNED projection onto the kb direction — catches Reversal
+            // (player moves the WRONG way; scalar speed would still look
+            // healthy) and JumpReset attenuation. peakAlong only grows on
+            // motion ACTUALLY in the kb direction.
+            double along = f.dx * k.kbDirX + f.dz * k.kbDirZ;
+            if (along > k.peakAlong) k.peakAlong = along;
+            if (-along > k.maxAgainst) k.maxAgainst = -along;
             k.maxUp = Math.max(k.maxUp, f.dy);
         }
 
@@ -71,13 +86,26 @@ public final class VelocityCheck extends SimCheck {
 
         if (ctx.unstableBasic()) return;
 
-        double frac = k.expectedH <= 0 ? 1.0 : k.peakH / k.expectedH;
+        double frac = k.expectedH <= 0 ? 1.0 : k.peakAlong / k.expectedH;
         double minFrac = cfgD("min-fraction", 0.33);
+
+        // Reversal: signed projection went strongly NEGATIVE — the player
+        // moved AGAINST the knockback direction. No legit mechanic does this
+        // for a meaningful magnitude; counter-strafe still nets positive
+        // along-direction motion from the kb impulse.
+        if (k.maxAgainst > cfgD("max-against", 0.18) && k.expectedH > 0.18) {
+            diverge(ctx, cfgD("reversal-score", 8.0),
+                    cfgD("threshold", 9.0), cfgI("min-streak", 2),
+                    String.format("kb reversal: moved %.3f against kb dir (exp=%.3f)",
+                            k.maxAgainst, k.expectedH), false);
+            return;
+        }
+
         if (frac < minFrac) {
             diverge(ctx, (minFrac - frac) * cfgD("score-scale", 22.0),
                     cfgD("threshold", 9.0), cfgI("min-streak", 3),
-                    String.format("absorbed %.0f%% of simulated knockback (peakH=%.3f exp=%.3f)",
-                            frac * 100, k.peakH, k.expectedH), false);
+                    String.format("absorbed %.0f%% of simulated knockback (along=%.3f exp=%.3f)",
+                            frac * 100, k.peakAlong, k.expectedH), false);
         } else {
             clean(ctx, 2.0);
         }

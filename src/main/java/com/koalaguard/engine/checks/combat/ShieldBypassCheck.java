@@ -43,6 +43,7 @@ public final class ShieldBypassCheck extends SimCheck {
 
     private static final class S {
         long lastCycleAtkSeq = Long.MIN_VALUE;
+        long lastBackstabNanos = Long.MIN_VALUE;
         final Deque<Double> cycleMs = new ArrayDeque<>();
     }
 
@@ -65,6 +66,22 @@ public final class ShieldBypassCheck extends SimCheck {
         if (ctx.unstableBasic()) return;
         UUID id = ctx.data.getUuid();
         S s = state.computeIfAbsent(id, k -> new S());
+
+        // ── Variant 2: BACKSTAB-TELEPORT (Meteor displacement-aura family).
+        // The HIGHEST-priority damage handler already cancelled the bypass
+        // damage; we just need to report it through this check so staff see
+        // it under the right name. A single confirmed backstab is conclusive
+        // (the geometry test is exact, zero FP), so flag immediately.
+        long bsNanos = ctx.state.combat.lastBackstabBlockedNanos;
+        if (bsNanos > 0 && bsNanos != s.lastBackstabNanos) {
+            s.lastBackstabNanos = bsNanos;
+            if (diverge(ctx, cfgD("backstab-score", 12.0), cfgD("threshold", 10.0),
+                    cfgI("backstab-min-streak", 1),
+                    "backstab-teleport shield bypass :: " + ctx.state.combat.lastBackstabDetail,
+                    false)) {
+                armCombatCancel(ctx);
+            }
+        }
 
         List<CapturedPacket> recent = ctx.state.log.recent(160);
         List<CapturedPacket> chrono = new ArrayList<>(recent);

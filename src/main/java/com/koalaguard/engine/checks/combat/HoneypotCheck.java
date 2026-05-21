@@ -82,7 +82,7 @@ public final class HoneypotCheck extends SimCheck {
                 // a real (accidental) raytrace, so DO NOT flag. Only an
                 // entity-iterating aura attacks while looking well away from it.
                 PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
-                double[] el = Combat.eyeLook(f, player);
+                double[] el = Combat.eyeLook(f, p, player);
                 double tx = h.hx - el[0], ty = h.hy - el[1], tz = h.hz - el[2];
                 double dlen = Math.sqrt(tx * tx + ty * ty + tz * tz);
                 if (dlen > 1e-3) {

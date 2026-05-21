@@ -50,6 +50,12 @@ public final class HitValidationCheck extends SimCheck {
 
         PositionFrame f = ctx.state.frameAtOrBefore(atk);
         double[] eye = Combat.eyeLook(f, ctx.player);
+        // True rotation at the exact attack-packet instant — survives a
+        // stationary attacker whose frame yaw is frozen between movements.
+        if (ctx.state.combat.lastAttackHasRot) {
+            eye[3] = ctx.state.combat.lastAttackYaw;
+            eye[4] = ctx.state.combat.lastAttackPitch;
+        }
 
         // Lag-compensated victim hitbox (rewound to the attack instant). With
         // the accurate box the angular gate is tight enough to catch a small

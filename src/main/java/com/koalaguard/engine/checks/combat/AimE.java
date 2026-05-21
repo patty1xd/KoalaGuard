@@ -73,7 +73,7 @@ public final class AimE extends SimCheck {
             if (box == null) continue;
 
             PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
-            double[] el = Combat.eyeLook(f, ctx.player);
+            double[] el = Combat.eyeLook(f, p, ctx.player);
             double err = Combat.aimAngle(el[0], el[1], el[2],
                     (float) el[3], (float) el[4], box);
             s.err.addLast(err);

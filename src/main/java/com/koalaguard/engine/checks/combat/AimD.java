@@ -88,8 +88,18 @@ public final class AimD extends SimCheck {
                 PositionFrame g = byTick.get(t);
                 if (g != null) snap = Math.max(snap, g.dYaw);
             }
-            double err = Combat.aimAngle(at.x, at.y + Combat.eyeHeight(ctx.player),
-                    at.z, at.yaw, at.pitch, victim);
+            // True client rotation at attack send time (packet-stamped), falling
+            // back to the frame's yaw. Victim hitbox rewound to the attack
+            // instant — desync between hit and eval would otherwise inflate err
+            // on a fast-moving victim and silently mask the snap signature.
+            float useYaw   = p.hasRot ? p.yaw   : at.yaw;
+            float usePitch = p.hasRot ? p.pitch : at.pitch;
+            double[] box = ctx.state.targets.boxAt(p.intA, p.recvNanos);
+            double err = box != null
+                    ? Combat.aimAngle(at.x, at.y + Combat.eyeHeight(ctx.player),
+                            at.z, useYaw, usePitch, box)
+                    : Combat.aimAngle(at.x, at.y + Combat.eyeHeight(ctx.player),
+                            at.z, useYaw, usePitch, victim);
 
             // Did the yaw return near its pre-snap value after the hit?
             double bestReturn = Double.MAX_VALUE;
