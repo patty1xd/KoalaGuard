@@ -72,22 +72,39 @@ public final class MultiTaskCheck extends SimCheck {
         long start = ctx.state.usingItemSinceNanos;
         long staleNs = cfgL("use-stale-ms", 30_000L) * 1_000_000L;
 
-        int attacks = 0;
-        long maxAttackSeq = -1;
+        int attacks = 0, placements = 0, drops = 0;
+        long maxActionSeq = -1;
         for (CapturedPacket p : ctx.state.log.recent(256)) {
-            if (p.kind != PacketKind.INTERACT_ENTITY) continue;
-            if (!String.valueOf(p.objA).contains("ATTACK")) continue;
             if (p.recvNanos < start) continue;                 // before this use
             if (p.recvNanos - start > staleNs) continue;        // safety bound
-            attacks++;
-            if (p.seq > maxAttackSeq) maxAttackSeq = p.seq;
+
+            if (p.kind == PacketKind.INTERACT_ENTITY
+                    && String.valueOf(p.objA).contains("ATTACK")) {
+                attacks++;
+                if (p.seq > maxActionSeq) maxActionSeq = p.seq;
+            } else if (p.kind == PacketKind.BLOCK_PLACE) {
+                placements++;
+                if (p.seq > maxActionSeq) maxActionSeq = p.seq;
+            } else if (p.kind == PacketKind.DIGGING && p.strA != null
+                    && (p.strA.equals("DROP_ITEM") || p.strA.equals("DROP_ALL_ITEMS"))) {
+                drops++;
+                if (p.seq > maxActionSeq) maxActionSeq = p.seq;
+            }
         }
 
-        if (attacks >= cfgI("max-attacks-in-use", 2) && maxAttackSeq > s.reportedSeq) {
-            s.reportedSeq = maxAttackSeq;
+        // Vanilla: starting ANY of these actions cancels a continuous-use item
+        // (the client sends RELEASE_USE_ITEM first). The use-session flag
+        // therefore can ONLY be open while none have happened. Any single
+        // action mid-session is already vanilla-impossible; threshold is
+        // generous to avoid sub-tick race windows.
+        int totalActions = attacks + placements + drops;
+        int max = cfgI("max-actions-in-use", 2);
+        if (totalActions >= max && maxActionSeq > s.reportedSeq) {
+            s.reportedSeq = maxActionSeq;
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 9.0),
                     cfgI("min-streak", 2),
-                    "attacked " + attacks + "x during an uninterrupted item-use",
+                    "actions during uninterrupted item-use: "
+                            + attacks + " attack, " + placements + " place, " + drops + " drop",
                     false);
         }
     }
