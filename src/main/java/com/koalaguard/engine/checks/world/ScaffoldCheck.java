@@ -123,6 +123,33 @@ public final class ScaffoldCheck extends SimCheck {
                 }
             }
 
+            // S1b — TOWER: vertical builder (jumping straight up, placing the
+            // pillar block right under the feet, mostly stationary horizontally).
+            // The rotation cheat that goes with tower momentarily looks down
+            // for the place — our aim-off check passes because the stamped
+            // rotation IS down, but the OVERALL behaviour (sustained vertical
+            // climb with no horizontal movement, place block below feet,
+            // machine cadence) is vanilla-implausible. Catches modes labelled
+            // "Tower" / "Strict" / "StrictSprint" across RusherHack, Wurst,
+            // LiquidBounce, Meteor.
+            if (f != null) {
+                double mh = Math.sqrt(f.dx * f.dx + f.dz * f.dz);
+                boolean vertical = mh < cfgD("tower-max-horizontal", 0.10);
+                boolean placeBelowFeet = p.y <= Math.floor(ey - 1.4);
+                // Was the player jumping (saw a fresh jump impulse recently)?
+                boolean recentJumpImpulse = false;
+                int jumpScan = cfgI("tower-jump-scan", 8);
+                for (PositionFrame g : ctx.state.recentFrames(jumpScan)) {
+                    if (g.dy > cfgD("tower-min-jump", 0.30)) {
+                        recentJumpImpulse = true; break;
+                    }
+                }
+                if (vertical && placeBelowFeet && recentJumpImpulse) {
+                    bad += cfgD("tower-score", 4.0);
+                    why.append("tower ");
+                }
+            }
+
             // Sample cadence + pitch for S2.
             if (s.lastPlaceTick != Long.MIN_VALUE) {
                 long iv = p.tickIndex - s.lastPlaceTick;
