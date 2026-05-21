@@ -59,7 +59,19 @@ public final class TimerCheck extends SimCheck {
         if (ratio > 1.0 + eps) {
             diverge(ctx, (ratio - 1.0) * cfgD("score-scale", 40.0),
                     cfgD("threshold", 10.0), cfgI("min-streak", 2),
-                    String.format("tick ratio %.3f over %d server ticks", ratio, window), true);
+                    String.format("tick ratio %.3f over %d server ticks (fast timer)", ratio, window), true);
+        } else if (cfgB("detect-slow-timer", true)
+                && ratio > 0 && ratio < 1.0 - cfgD("max-slow-ratio", 0.20)) {
+            // SLOW timer: the client deliberately runs slow so movement
+            // packets arrive less often than server ticks — a kind of mini-
+            // blink that lets the player "skip" damage windows or animation
+            // checks without a burst on release. Wurst's slow-timer + various
+            // LB modes use it for projectile-dodge or shield abuse. Vanilla
+            // packet loss / lag spikes also produce low ratios — guarded by
+            // the lag model unstability gate above and a generous threshold.
+            diverge(ctx, (1.0 - ratio) * cfgD("slow-score-scale", 40.0),
+                    cfgD("threshold", 10.0), cfgI("min-streak", 3),
+                    String.format("tick ratio %.3f over %d server ticks (slow timer)", ratio, window), true);
         } else {
             clean(ctx, 3.0);
         }

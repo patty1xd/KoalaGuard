@@ -51,8 +51,32 @@ public final class JesusCheck extends SimCheck {
                     cfgI("min-streak", 6),
                     String.format("on %s dy=%.3f h=%.3f", feet, f.dy, f.horizontalSpeed()),
                     true);
-        } else {
-            clean(ctx, 1.5);
+            return;
         }
+
+        // Dolphin / Bounce-Jesus: the cheat bounces ON the water surface
+        // instead of holding y still — each tick alternates up/down so the
+        // mean |dy| stays small but no single frame meets the flat threshold
+        // above. Catches it by averaging dy magnitude over the recent window:
+        // a vanilla swimmer continually loses height (sinks) → big maxDown;
+        // a vanilla water-jumper sinks BETWEEN jumps; the bouncer never goes
+        // below the surface, so its accumulated descent stays near zero.
+        if (onLiquid && !lilypad && !frost && f.horizontalSpeed() > 0.06) {
+            double accDown = 0;
+            int samples = 0;
+            for (var g : ctx.state.recentFrames(cfgI("dolphin-scan", 16))) {
+                if (g.dy < -0.01) accDown += -g.dy;
+                samples++;
+            }
+            if (samples >= 10 && accDown < cfgD("dolphin-max-descent", 0.40)) {
+                diverge(ctx, cfgD("dolphin-score", 4.0), cfgD("threshold", 12.0),
+                        cfgI("dolphin-min-streak", 4),
+                        String.format("dolphin-walk on %s: accDown=%.2f n=%d",
+                                feet, accDown, samples),
+                        true);
+                return;
+            }
+        }
+        clean(ctx, 1.5);
     }
 }

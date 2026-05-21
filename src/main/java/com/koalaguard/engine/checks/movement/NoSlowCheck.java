@@ -72,7 +72,39 @@ public final class NoSlowCheck extends SimCheck {
                 return;
             }
         }
+
+        // ── Use-item NoSlow (eat/drink/bow/crossbow/shield/spyglass).
+        //    Vanilla forces ~0.04 b/t (≥70% slowdown) while a continuous-use
+        //    item is being used. A NoSlow cheat keeps the player at sprint /
+        //    walk speed. The old item-use detection FP'd on walking-while-
+        //    eating (which is slow anyway); this gate is high enough that ONLY
+        //    sustained near-sprint speed mid-use trips it — humans cannot do
+        //    that in vanilla. Catches NoSlowdown / EatHack / BowSpeed across
+        //    Wurst, LiquidBounce, Meteor, Sigma.
+        boolean usingContinuous = ctx.state.usingItem
+                && (isContinuousUse(ctx.state.inv.mainHand)
+                 || isContinuousUse(ctx.state.inv.offHand));
+        if (usingContinuous) {
+            double cap = cfgD("max-use-speed", 0.15);
+            if (h > cap) {
+                diverge(ctx, (h - cap) * cfgD("use-score-scale", 30.0),
+                        cfgD("threshold", 9.0), cfgI("use-min-streak", 6),
+                        String.format("use-item speed %.3f > %.2f (using %s)",
+                                h, cap, ctx.state.inv.mainHand), true);
+                return;
+            }
+        }
         clean(ctx, 1.0);
+    }
+
+    private static boolean isContinuousUse(Material m) {
+        if (m == null) return false;
+        if (m.isEdible()) return true;
+        return switch (m) {
+            case BOW, CROSSBOW, SHIELD, TRIDENT, SPYGLASS, GOAT_HORN, BRUSH,
+                 POTION, MILK_BUCKET, HONEY_BOTTLE -> true;
+            default -> false;
+        };
     }
 
     private boolean hasSoulSpeed(CheckContext ctx) {

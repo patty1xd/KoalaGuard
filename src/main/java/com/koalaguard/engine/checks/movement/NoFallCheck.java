@@ -56,7 +56,7 @@ public final class NoFallCheck extends SimCheck {
         if (f.clientGround && !supported && acc > cfgD("min-fall", 3.2)) {
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 12.0),
                     cfgI("min-streak", 2),
-                    String.format("onGround spoof after %.1f-block fall", acc), false);
+                    String.format("onGround spoof after %.1f-block fall", acc), true);
         } else {
             if (supported) { acc = 0; clean(ctx, 2.0); }
         }

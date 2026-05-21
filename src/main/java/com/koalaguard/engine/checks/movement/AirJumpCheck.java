@@ -49,8 +49,13 @@ public final class AirJumpCheck extends SimCheck {
         boolean airborne  = !f.simGround && s.airTicks > cfgI("min-air-ticks", 4);
 
         if (freshJump && airborne) {
-            diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 9.0),
-                    cfgI("min-streak", 2),
+            // Vanilla-impossible. A single confirmed mid-air jump is conclusive
+            // (all of {slime/bed/kb/levitation/web/elytra/teleport/special-block/
+            // ladder/water/slow-fall} are exempt above). One detection ⇒ flag +
+            // immediate setback (the setback path is now synchronous, so the
+            // player is rubber-banded the same tick).
+            diverge(ctx, cfgD("score", 12.0), cfgD("threshold", 9.0),
+                    cfgI("min-streak", 1),
                     String.format("air jump dy=%.3f after %d air ticks", f.dy, s.airTicks),
                     true);
         } else {
