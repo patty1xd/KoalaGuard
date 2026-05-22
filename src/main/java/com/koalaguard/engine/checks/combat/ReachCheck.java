@@ -75,23 +75,21 @@ public final class ReachCheck extends SimCheck {
         // which servers can raise via gear / permission plugins. Reading it
         // here means our cap respects whatever the SERVER has decided is
         // legitimate for this player — preventing false reach flags on
-        // servers that hand out extended-reach perks. Falls back to the
-        // vanilla 3.0 when the attribute / API is missing.
+        // servers that hand out extended-reach perks. Resolved through the
+        // registry so this compiles across the 1.20.5 → 1.21.11 attribute
+        // API rename (interface in newer Paper; the enum constant moved /
+        // was renamed in different builds, so a direct field reference would
+        // be brittle).
         double base = cfgD("max-reach", 3.0);
         try {
-            org.bukkit.attribute.AttributeInstance attr = null;
-            try { attr = ctx.player.getAttribute(
-                    org.bukkit.attribute.Attribute.PLAYER_ENTITY_INTERACTION_RANGE); }
-            catch (Throwable t1) {
-                try {
-                    org.bukkit.attribute.Attribute a = org.bukkit.Registry.ATTRIBUTE.get(
-                            org.bukkit.NamespacedKey.minecraft("entity_interaction_range"));
-                    if (a != null) attr = ctx.player.getAttribute(a);
-                } catch (Throwable ignored) { }
-            }
-            if (attr != null) {
-                double v = attr.getValue();
-                if (v > base) base = v;                 // never lower than the configured floor
+            org.bukkit.attribute.Attribute a = org.bukkit.Registry.ATTRIBUTE.get(
+                    org.bukkit.NamespacedKey.minecraft("entity_interaction_range"));
+            if (a != null) {
+                org.bukkit.attribute.AttributeInstance attr = ctx.player.getAttribute(a);
+                if (attr != null) {
+                    double v = attr.getValue();
+                    if (v > base) base = v;              // never lower than the configured floor
+                }
             }
         } catch (Throwable ignored) { }
 

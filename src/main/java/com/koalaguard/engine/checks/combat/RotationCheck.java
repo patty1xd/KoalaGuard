@@ -36,11 +36,37 @@ public final class RotationCheck extends SimCheck {
 
         // 1) Out-of-range pitch — conclusive, no sample needed.
         float pitch = ctx.state.prevPitch;
+        float yaw   = ctx.state.prevYaw;
         if (Math.abs(pitch) > 90.0001f) {
             diverge(ctx, cfgD("invalid-pitch-score", 8.0),
                     cfgD("threshold", 14.0), cfgI("min-streak", 3),
                     String.format("pitch %.2f out of [-90,90]", pitch), false);
             return;
+        }
+
+        // 1b) NaN / Infinity in rotation. Some packet-crash exploits send these
+        //     to confuse anticheats or trigger server-side bugs; vanilla mouse
+        //     output never produces them. Single occurrence ⇒ conclusive.
+        if (Float.isNaN(pitch) || Float.isNaN(yaw)
+                || Float.isInfinite(pitch) || Float.isInfinite(yaw)) {
+            diverge(ctx, cfgD("invalid-pitch-score", 8.0),
+                    cfgD("threshold", 14.0), cfgI("min-streak", 1),
+                    "non-finite rotation yaw=" + yaw + " pitch=" + pitch, false);
+            return;
+        }
+
+        // 1c) Yaw leap > 180° in a single rotation packet — physically the
+        //     widest distinguishable mouse turn is ≤180° (the wrap point);
+        //     anything bigger is an unwrapped value that the cheat forgot to
+        //     normalise. Single sample, large margin; legit shouldn't trip.
+        java.util.List<Float> signed = ctx.state.signedYawDeltas(8);
+        for (float d : signed) {
+            if (Math.abs(d) > cfgD("max-yaw-leap-deg", 180.0)) {
+                diverge(ctx, cfgD("invalid-pitch-score", 8.0),
+                        cfgD("threshold", 14.0), cfgI("min-streak", 1),
+                        String.format("yaw leap %.1f° in one packet", d), false);
+                return;
+            }
         }
 
         // 2) Quantised aim — only while fighting, only on a large sample.
