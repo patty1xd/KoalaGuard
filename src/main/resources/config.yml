@@ -29,6 +29,11 @@ punishments:
 enforcement:
   cancel-combat: true
   combat-cancel-ms: 1500
+  # After a setback the netty layer drops position-bearing movement packets
+  # for this window so cheat packets already queued (blink burst, backstab
+  # return, clip rebound) can't immediately undo the rubber-band before
+  # Mojang's handler sees them. Rotation packets still pass (no camera lock).
+  movement-cancel-ms: 350
 
 # ── Anti-false-positive gate ─────────────────────────────────────
 # A confirmed violation is still DROPPED while any of these hold. The
@@ -107,6 +112,11 @@ checks:
     score-scale: 40.0
     threshold: 10.0
     min-streak: 2
+    # Slow-timer variant (the client deliberately runs slow; lets the player
+    # "skip" damage/animation windows without a burst-release fingerprint).
+    detect-slow-timer: true
+    max-slow-ratio: 0.20
+    slow-score-scale: 40.0
 
   fastclimb:
     enabled: true
@@ -137,9 +147,13 @@ checks:
     ban-duration: 7d
     min-jump-impulse: 0.30
     min-air-ticks: 4
-    score: 6.0
+    # Single confirmed mid-air jump is vanilla-impossible after every grace
+    # (slime/bed/kb/levitation/web/elytra/teleport/special-block/ladder/
+    # water/slow-fall all exempt above). One detection ⇒ instant flag +
+    # sync rubber-band.
+    score: 12.0
     threshold: 9.0
-    min-streak: 2
+    min-streak: 1
 
   noslow:
     enabled: true
@@ -151,6 +165,13 @@ checks:
     score-scale: 50.0
     threshold: 9.0
     min-streak: 4
+    # Use-item slowdown bypass (sprint while eating / drawing bow / blocking
+    # / using spyglass / drinking). Threshold set sprint-magnitude so legit
+    # walking-while-eating (~0.04 b/t) never trips; the cheat lets the
+    # player keep near-sprint speed (~0.281 b/t) instead.
+    max-use-speed: 0.15
+    use-score-scale: 30.0
+    use-min-streak: 6
 
   # ── COMBAT (reconstructed-position raytrace + aim) ──
   # Lag-compensated: takes the SMALLEST eye→hitbox distance over the victim's
@@ -204,6 +225,10 @@ checks:
     quantise-epsilon: 0.012
     min-quantised-fraction: 0.97
     quantise-score: 6.0
+    # Yaw leap > 180° in a single rotation packet is physically impossible
+    # (the wrap point). Any larger value is unwrapped output from a cheat.
+    # Single sample, large margin so legit cinematic-camera-style spins never trip.
+    max-yaw-leap-deg: 180.0
 
   velocity:
     enabled: true
@@ -216,6 +241,10 @@ checks:
     score-scale: 22.0
     threshold: 9.0
     min-streak: 3
+    # Reversal variant — the player moves AGAINST the knockback direction.
+    # Signed-projection catch (scalar speed would still look healthy).
+    max-against: 0.18
+    reversal-score: 8.0
 
   # Not a CPS limit — measures inhuman REGULARITY of attack intervals.
   autoclicker:
@@ -231,6 +260,11 @@ checks:
     score: 6.0
     threshold: 10.0
     min-streak: 3
+    # High-rate floor — sustained > 14 CPS (mean < 72 ms) over 28+ samples is
+    # the bot signature ±jitter-randomized clickers can't hide (no human keeps
+    # ≥14 CPS over 30 clicks). Catches butterfly emulation and triggerbot too.
+    inhuman-mean-ms: 72.0
+    inhuman-min-samples: 28
 
   # ── WORLD ──
   nuker:
@@ -286,7 +320,10 @@ checks:
   # discard it. Conclusive → confirms immediately + rubber-bands.
   clip:         { enabled: true, max-violations: 6,  punishment: kick, ban-duration: 30d, min-dist: 1.0, score: 15.0, threshold: 9.0, min-streak: 1 }
   blink:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-frames-per-tick: 9, score-scale: 3.0, threshold: 9.0, min-streak: 2 }
-  jesus:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-dy: 0.12, min-speed: 0.08, score: 5.0, threshold: 12.0, min-streak: 6 }
+  # Jesus + Dolphin/BounceJesus variant (accumulated descent over recent
+  # frames stays near zero — vanilla swim continually sinks between strokes,
+  # bouncer never goes below the surface).
+  jesus:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-dy: 0.12, min-speed: 0.08, score: 5.0, threshold: 12.0, min-streak: 6, dolphin-scan: 16, dolphin-max-descent: 0.40, dolphin-score: 4.0, dolphin-min-streak: 4 }
   spider:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, min-up: 0.02, min-air-ticks: 4, score: 5.0, threshold: 10.0, min-streak: 5 }
   # Disabled by default — proper elytra detection needs full glide physics.
   elytrafly:    { enabled: false, max-violations: 10, punishment: kick, ban-duration: 14d, min-climb-dy: 0.15, rocket-window-ms: 3000, score: 3.0, threshold: 12.0, min-streak: 25 }
@@ -321,19 +358,58 @@ checks:
   # visibility). Lag-comp victim history; only clean acquisitions; flags only
   # when reaction is BOTH too fast AND too consistent over many engagements.
   aimh:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, engage-gap-ns: 1200000000, reach: 3.2, max-plausible-ms: 2000.0, sample-cap: 24, min-samples: 6, max-mean-ms: 90.0, max-sd-ms: 45.0, score: 7.0, threshold: 10.0, min-streak: 3 }
-  crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, score-scale: 4.0, threshold: 9.0, min-streak: 3 }
+  # Crystal break rate + respawn-anchor cycle rate. Catches classic
+  # CrystalAura plus AnchorAura / safe-anchor / Wurst's AnchorAura. The
+  # silent-aim part of aura attacks lands on AimA-H independently.
+  crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, max-anchor-per-sec: 5, score-scale: 4.0, anchor-score-scale: 4.0, threshold: 9.0, min-streak: 3 }
   # Uses PRECISE simGround + a real-fall exclusion so legit jump/air crits
   # never flag — only a hop that never leaves the ground and never falls.
-  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, max-fall: 0.20, score: 4.0, threshold: 10.0, min-streak: 5 }
-  # Mace smash exploit — a SMASH-magnitude hit (server-computed damage above
-  # vanilla-max-damage) with no genuine fall by EITHER the server's own fall
-  # view or the geometric reconstruction. Legit jump/air smash always has a
-  # real fall -> never flags; a normal grounded mace hit never reaches smash
-  # damage -> never flags. Works while standing perfectly still.
-  mace:         { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, vanilla-max-damage: 25.0, min-fall-blocks: 1.0, window-ticks: 8, min-fall-dy: 0.25, score: 8.0, threshold: 10.0, min-streak: 2 }
-  # Auto shield-disable (NoShield/auto-axe): swap → hit → swap-back at machine-
-  # consistent cadence. Conservative: needs many low-variance samples.
-  shieldbypass: { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, swap-window-ms: 220, sample-cap: 30, min-samples: 8, max-sd-ms: 35.0, max-mean-ms: 320.0, score: 7.0, threshold: 10.0, min-streak: 3 }
+  # `cap-*` keys surface the HIGHEST-priority damage-event PREVENTION that
+  # strips the crit multiplier when server thinks fallDistance > 0 but the
+  # engine's recent simGround frames disagree. Catches ALL LiquidBounce
+  # variants (NoGround, Packet [Vanilla/NCP/Falling/Low/Down/Grim/BlocksMC],
+  # MiniJump, Blink, Timer) at the damage edge — they all need server to
+  # believe in a fall, which the engine's collision-truth contradicts.
+  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, max-fall: 0.20, score: 4.0, threshold: 10.0, min-streak: 5, cap-score: 8.0, cap-min-streak: 1, cap-frames: 4 }
+  # Mace smash exploit — server-computed smash damage with no genuine fall.
+  # `cap-*` keys surface the HIGHEST-priority HARD CAP that REWRITES the
+  # damage event to legit-vanilla using the engine's collision-truth real
+  # fall (engineRealFall walks frames newest→oldest accumulating -dy until
+  # a simGround frame). On flat ground the cap = vanilla base + sharpness
+  # margin → cheat literally cannot smash. Legit jump/air smashes pass
+  # untouched (real fall is non-zero by collision truth).
+  mace:         { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, vanilla-max-damage: 25.0, min-fall-blocks: 1.0, window-ticks: 8, min-fall-dy: 0.25, score: 8.0, threshold: 10.0, min-streak: 2, cap-score: 10.0, cap-min-streak: 1 }
+  # Shield bypass — two variants, both covered:
+  #  • Auto axe-swap (Wurst, LB, Meteor's WeaponSwapOptimizer): swap → hit
+  #    → swap-back at machine-consistent cadence (low std-dev).
+  #  • Backstab-teleport (Meteor displacement-aura family): position packet
+  #    behind victim → attack from behind (bypasses shield front cone) →
+  #    teleport back. Caught at HIGHEST damage event: if engine's recent
+  #    frames had attacker IN FRONT but server-current is BEHIND, and the
+  #    engine-vs-current gap > max-legit-gap (or single step > max-legit-
+  #    step), the damage event is CANCELLED (shield holds) + flagged.
+  #    Backstab keys below are also read by the HIGHEST handler in
+  #    BukkitStateListener.onShieldBackstab.
+  shieldbypass:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 30d
+    swap-window-ms: 220
+    sample-cap: 30
+    min-samples: 8
+    max-sd-ms: 35.0
+    max-mean-ms: 320.0
+    score: 7.0
+    threshold: 10.0
+    min-streak: 3
+    # Backstab-teleport prevention
+    backstab-scan-frames: 6
+    min-front-frames: 3
+    max-legit-gap: 2.5
+    max-legit-step: 1.0
+    backstab-score: 12.0
+    backstab-min-streak: 1
   # Honeypot — two invisible trap entities next to a player in a PvP context:
   # an ArmorStand (catches all-entity/mob auras) AND, when fake-player:true, a
   # packet-level GHOST PLAYER sent only to that client (catches players-only
@@ -350,10 +426,15 @@ checks:
   # client outs itself (meteor-client, wurst, liquidbounce, …); vanilla and
   # legit mods never use these. Immediate, ~0 FP.
   cheatclient:  { enabled: true, max-violations: 1, punishment: kick, ban-duration: permanent, score: 20.0, threshold: 9.0, min-streak: 1 }
-  # MultiTask — >=2 attacks inside one uninterrupted item-use (eat/block/bow
-  # while attacking). Vanilla-impossible; near-zero FP.
-  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-attacks-in-use: 2, use-stale-ms: 30000, score: 6.0, threshold: 9.0, min-streak: 2 }
-  inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
+  # MultiTask — >=2 actions inside one uninterrupted item-use (eat/block/bow
+  # + attack OR + block-place OR + drop). Vanilla cancels use the moment any
+  # of these happen, so the use-flag staying open IS the contradiction.
+  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 2, use-stale-ms: 30000, score: 6.0, threshold: 9.0, min-streak: 2 }
+  # Inventory automation: AutoArmor / AutoTool / AutoMend (window-0 cluster
+  # OR inv-click coincident with attack) AND ChestStealer / FastStealer /
+  # AutoSteal (non-zero window-id burst — vanilla shift-click cap is 1/tick,
+  # a stealer fires 10+ in 100ms).
+  inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, chest-burst-window-ns: 250000000, chest-burst-threshold: 6, chest-score-scale: 2.0, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
   # Counts swaps bound to the SAME reconstructed tick (vanilla sends <=1/tick,
   # so mashing F can never trip it — only an injected flood can).
   offhandcrash: { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-swaps-per-tick: 3, score-scale: 5.0, threshold: 9.0, min-streak: 2 }
@@ -363,6 +444,67 @@ checks:
   # Look now comes from the netty-accurate rotation stamped on the place
   # packet (no longer a lagged frame), so a tight max-angle is safe again;
   # cadence only CORROBORATES an aim-off/backward place (rhythmic = human).
-  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 65.0, max-reach: 5.5, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
-  # AutoWeb — automatic cobweb placement on/around an opponent in combat.
-  autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, attack-window-ticks: 4, combat-radius: 5.0, max-angle: 55.0, aim-score: 6.0, combat-score: 5.0, sample-cap: 20, min-samples: 6, max-sd-interval: 0.9, cadence-score: 6.0, threshold: 10.0, min-streak: 3 }
+  # Scaffold — Bridge (S0 aim-off + S1 backward-walk + S2 cadence) PLUS the
+  # Tower variant (vertical-only movement + place below feet + recent jump
+  # impulse). Tower's rotation-spoof bypass on aim-off is caught by tower-*
+  # keys because the geometry of "rising while placing under feet" is itself
+  # the signature, independent of where the cheat claims to be looking.
+  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 65.0, max-reach: 5.5, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, tower-max-horizontal: 0.10, tower-jump-scan: 8, tower-min-jump: 0.30, tower-score: 4.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
+  # AutoWeb — automatic cobweb placement in combat. Two distinct geometric
+  # signatures:
+  #   S0 self-web without looking down — cobweb placed at attacker's own
+  #      position while pitch < self-min-look-down-pitch (legit self-web
+  #      requires looking down at feet; the cheat keeps the camera level
+  #      to keep fighting).
+  #   S1 opponent-web — cobweb placed AT (or right against) an enemy's
+  #      hitbox (rewound via TargetTracker when available, so desync can't
+  #      hide the proximity).
+  # post-attack and machine-cadence only CORROBORATE — never standalone.
+  autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, attack-window-ticks: 4, combat-radius: 5.0, self-radius: 1.6, enemy-radius: 1.6, self-min-look-down-pitch: 55.0, self-web-score: 7.0, opponent-web-score: 7.0, max-angle: 55.0, aim-score: 5.0, combat-score: 5.0, sample-cap: 20, min-samples: 6, max-sd-interval: 0.9, cadence-score: 6.0, threshold: 10.0, min-streak: 3 }
+
+  # ── NEW (2026-05-22) ──
+  # VehicleFly / BoatFly — every other movement check exempts `exVehicle`, so
+  # this independent check inspects the vehicle entity's vertical motion
+  # directly. Boats are the canonical target; flip any-vehicle:true for
+  # paranoid mode on pigs/horses (noisier; staircase climbing legit).
+  vehiclefly:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 14d
+    any-vehicle: false
+    min-up: 0.08
+    min-up-ticks: 4
+    min-climb: 0.6
+    score: 6.0
+    threshold: 9.0
+    min-streak: 2
+
+  # FastBreak / InstaBreak — tool/enchant/effect-aware vanilla break-time vs
+  # measured START_DIGGING→FINISHED_DIGGING latency. ×0.4 tolerance so legit
+  # haste-tier transitions or transient lag spikes never trip. Creative is
+  # exempt; insta-mine combinations resolve to ~50ms expected and pass.
+  fastbreak:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    min-hardness: 0.4
+    tolerance-fraction: 0.40
+    score-scale: 8.0
+    threshold: 9.0
+    min-streak: 3
+
+  # AirPlace — block placed against an air "clicked face" (forged BLOCK_PLACE
+  # packet). 250ms grace covers the MC-279849 same-tick break-then-replace
+  # race so legit play never trips. Streak required so a single chunk-reload
+  # race tick is ignored.
+  airplace:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    break-grace-ns: 250000000
+    score: 5.0
+    threshold: 9.0
+    min-streak: 2
