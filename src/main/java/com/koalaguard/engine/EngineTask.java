@@ -51,7 +51,20 @@ public final class EngineTask extends BukkitRunnable {
             PlayerState s = d.engine;
 
             if (d.setbackPending) {              // mid-lagback: discard in-flight
-                s.intake.clear();
+                // Selective drain: drop MOVEMENT (would undo the teleport),
+                // PRESERVE aux packets so detection (AutoTotem / clicks /
+                // attacks / inventory) survives a rubber-band. The blanket
+                // intake.clear() pattern was eating those — documented bug.
+                int kept = 0;
+                java.util.ArrayList<CapturedPacket> survivors = new java.util.ArrayList<>();
+                CapturedPacket cp;
+                while ((cp = s.intake.poll()) != null) {
+                    if (cp.kind != PacketKind.MOVEMENT) {
+                        survivors.add(cp);
+                        kept++;
+                    }
+                }
+                for (CapturedPacket k : survivors) s.intake.offer(k);
                 s.moveInit = false;
                 continue;
             }
@@ -192,8 +205,12 @@ public final class EngineTask extends BukkitRunnable {
                               || now - d.lastWorldChangeMs < 4000
                               || now - d.lastVelocityMs    < 1500
                               || now - d.joinMs            < 3500;
+                // Include exWeb / exClimbing the same way the under-8 clip
+                // path does — tridenting out of a cobweb or boosting off a
+                // ladder can produce a single >8 displacement and was being
+                // flagged as a phantom clip.
                 boolean specialMove = s.exVehicle || s.exGliding || s.exRiptide
-                                   || s.exLevitation;
+                                   || s.exLevitation || s.exWeb || s.exClimbing;
                 if (!graced && !specialMove) {
                     d.clipSeq++;
                     d.clipDetail = String.format(
