@@ -239,6 +239,15 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                                 d.flagBadChannel = true;
                                 d.badChannel = "brand:" + hit;
                             }
+                            // Brand-vs-modloader-channel CONTRADICTION:
+                            // A cheat client commonly lies about its brand
+                            // (sends "vanilla") to dodge brand fingerprinting,
+                            // but still registers Fabric/Forge plugin channels
+                            // because the underlying mod loader does so itself.
+                            // A genuine vanilla client cannot register modded
+                            // channels — the loader doesn't exist. Set the
+                            // contradiction flag for CheatClientCheck.
+                            d.brandVanilla = lc.equals("vanilla");
                         }
                     }
                     return;
@@ -261,6 +270,20 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                     if (regHit != null) {
                         d.flagBadChannel = true;
                         d.badChannel = regHit;
+                    }
+                    // Brand="vanilla" + modded channels = cheat-client tell.
+                    // Genuine vanilla cannot register Fabric/Forge channels
+                    // because no mod loader is loaded. A cheat that lies
+                    // about its brand to dodge fingerprinting still has the
+                    // mod loader running underneath, which leaks its channels.
+                    if (d.brandVanilla) {
+                        for (String modCh : MOD_LOADER_CHANNELS) {
+                            if (reg.contains(modCh)) {
+                                d.flagBadChannel = true;
+                                d.badChannel = "vanilla-brand+modded-channel:" + modCh;
+                                break;
+                            }
+                        }
                     }
                 }
             } catch (Throwable ignored) { }
@@ -291,6 +314,19 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
         for (String id : CHEAT_IDS) if (s.contains(id)) return id;
         return null;
     }
+
+    /**
+     * Mod-loader plugin-channel substrings. ANY player whose brand is
+     * "vanilla" but who registers a channel containing one of these is
+     * lying — a genuine vanilla client has no mod loader and cannot
+     * register loader-defined channels.
+     */
+    private static final String[] MOD_LOADER_CHANNELS = {
+            "fabric", "fml", "forge", "fabric-screen-handler",
+            "fabric-api", "fabric:registry-sync", "forge:tier_sorting",
+            "litematica", "minihud", "tweakeroo", "malilib",
+            "quilt", "neoforge", "carpet"
+    };
 
     private void offer(PlayerState s, CapturedPacket p) {
         if (s.intake.size() < 4096) s.intake.offer(p);
