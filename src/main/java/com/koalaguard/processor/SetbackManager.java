@@ -88,7 +88,30 @@ public final class SetbackManager {
             p.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
             p.teleport(safe);
             d.engine.moveInit = false;
-            d.engine.intake.clear();
+            // Drain the queue selectively: drop MOVEMENT packets (they would
+            // undo the teleport on next replay) but PRESERVE aux packets
+            // (CLICK_WINDOW / INTERACT_ENTITY / ANIMATION / USE_ITEM /
+            // BLOCK_PLACE / DIGGING / ENTITY_ACTION / HELD_ITEM / PONG /
+            // CLOSE_WINDOW) so AutoTotem / InventoryChain / BadPacketsDuplicate
+            // / autoclicker / honeypot don't go blind for ~350ms after every
+            // setback. The old intake.clear() ate ALL of them — the documented
+            // "intake.clear() eats packets" bug pattern.
+            int kept = 0, dropped = 0;
+            java.util.ArrayList<com.koalaguard.engine.packet.CapturedPacket> survivors
+                    = new java.util.ArrayList<>();
+            com.koalaguard.engine.packet.CapturedPacket cp;
+            while ((cp = d.engine.intake.poll()) != null) {
+                if (cp.kind == com.koalaguard.engine.packet.PacketKind.MOVEMENT) {
+                    dropped++;
+                } else {
+                    survivors.add(cp);
+                    kept++;
+                }
+            }
+            for (com.koalaguard.engine.packet.CapturedPacket k : survivors) d.engine.intake.offer(k);
+            if (debug()) plugin.getLogger().info("[Setback] preserved " + kept
+                    + " aux pkts, dropped " + dropped + " movement pkts for "
+                    + p.getName());
             d.setbackPending = false;
             if (debug()) plugin.getLogger().info("[Setback] " + p.getName() + " -> " + reason);
         };
