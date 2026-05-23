@@ -62,6 +62,50 @@ public final class PlayerState {
     // that carry no rotation of their own.
     public volatile float netYaw, netPitch;
 
+    // ── Authoritative block-place ring ───────────────────────────────
+    // Filled by BukkitStateListener.onBlockPlace (MONITOR), so the check
+    // sees the ACTUAL placed material (not the spoofable inventory mirror —
+    // a cheat that swaps cobweb-in / place / swap-back inside one tick
+    // leaves the per-tick mainHand snapshot showing the WEAPON, never the
+    // cobweb). The ring also stores the player's location + pitch at the
+    // place instant so the AutoWeb self-vs-opponent geometry is accurate.
+    public static final class PlaceRecord {
+        public final long nanos;
+        public final org.bukkit.Material material;
+        public final int bx, by, bz;
+        public final double px, py, pz;        // player position at place
+        public final float pPitch, pYaw;       // player rotation at place
+        public PlaceRecord(long nanos, org.bukkit.Material material,
+                           int bx, int by, int bz,
+                           double px, double py, double pz,
+                           float pPitch, float pYaw) {
+            this.nanos = nanos; this.material = material;
+            this.bx = bx; this.by = by; this.bz = bz;
+            this.px = px; this.py = py; this.pz = pz;
+            this.pPitch = pPitch; this.pYaw = pYaw;
+        }
+    }
+    private static final int PLACE_RING_CAP = 32;
+    private final PlaceRecord[] placeRing = new PlaceRecord[PLACE_RING_CAP];
+    private int placeHead, placeCount;
+
+    public synchronized void pushPlace(PlaceRecord r) {
+        placeRing[placeHead] = r;
+        placeHead = (placeHead + 1) % PLACE_RING_CAP;
+        if (placeCount < PLACE_RING_CAP) placeCount++;
+    }
+
+    /** Newest-first snapshot of the recent server-confirmed placements. */
+    public synchronized java.util.List<PlaceRecord> recentPlaces(int max) {
+        java.util.List<PlaceRecord> out = new java.util.ArrayList<>(Math.min(max, placeCount));
+        int idx = (placeHead - 1 + PLACE_RING_CAP) % PLACE_RING_CAP;
+        for (int i = 0; i < placeCount && out.size() < max; i++) {
+            if (placeRing[idx] != null) out.add(placeRing[idx]);
+            idx = (idx - 1 + PLACE_RING_CAP) % PLACE_RING_CAP;
+        }
+        return out;
+    }
+
     // ── volatile booleans written by netty, read by main thread ──
     public volatile boolean sprinting, sneaking, usingItem;
     public volatile long usingItemSinceNanos;
