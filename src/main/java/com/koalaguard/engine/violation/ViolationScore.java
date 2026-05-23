@@ -33,7 +33,18 @@ public final class ViolationScore {
     public void recover(double amount) {
         score = Math.max(0.0, score - amount);
         cleanStreak++;
+        // Reset bad streak on a single clean tick, NOT after 3, AND aggressively
+        // drop badStreak on every clean. The previous "only zero after 3 cleans"
+        // kept old lag-spike streaks alive across minutes of mostly-clean play,
+        // letting isolated later spikes meet a stale min-streak gate. A streak
+        // should mean "consecutive bad ticks", not "ever seen this many bad
+        // ticks recently".
+        if (cleanStreak >= 1 && badStreak > 0) badStreak--;
         if (cleanStreak >= 3) badStreak = 0;
+        // Also bleed the score down faster when consistently clean — a long
+        // clean run should not leave latent score that a single later bad tick
+        // pushes back over threshold.
+        if (cleanStreak >= 10) score = Math.max(0.0, score - amount * 2);
     }
 
     public void reset() {
