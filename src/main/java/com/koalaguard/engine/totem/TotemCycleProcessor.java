@@ -75,14 +75,47 @@ public final class TotemCycleProcessor {
         // Collect the post-pop inventory-move burst (chronological).
         List<CapturedPacket> burst = new ArrayList<>();
         boolean interactedWhileOpen = false;
+        // Snapshot the cyclePopNanos to a local — the field is volatile and
+        // changes when a new pop arrives; the comparison below would otherwise
+        // shift mid-loop.
+        final long popNs = inv.cyclePopNanos;
+        // Compute the "burst window" first so the interaction probe only fires
+        // for packets that arrived BETWEEN the pop and the last burst packet.
+        // The original loop set interactedWhileOpen on any post-pop packet
+        // even AFTER the burst completed, which flipped the flag for legit
+        // combat resuming after the re-equip and false-flagged AutoTotemF.
+        long burstEndNs = popNs;
         for (CapturedPacket p : s.log.recent(256)) {
-            if (p.recvNanos < inv.cyclePopNanos) continue;
+            if (p.recvNanos < popNs) continue;
             boolean move = p.kind == PacketKind.CLICK_WINDOW
                     || (p.kind == PacketKind.DIGGING
                         && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA));
-            if (move) { burst.add(p); continue; }
-            // A world interaction in the same span ⇒ the inventory SCREEN was
-            // not genuinely open (Type F).
+            if (move) {
+                burst.add(p);
+                if (p.recvNanos > burstEndNs) burstEndNs = p.recvNanos;
+            }
+        }
+        if (burst.isEmpty()) {
+            // STACK-CARRY: off-hand totem decrements from a stack with no
+            // client inventory packet. This was a complete bypass — no cycle
+            // was built so AutoTotem A-F never saw the player. Emit a
+            // pseudo-cycle with burstSize=0 / cycleMs=0 / selectToEquipMs=0 /
+            // gaps=empty so downstream checks (specifically the "no inventory
+            // motion at all between pop and re-equip" autototem signature)
+            // can still see the event. AutoTotemA-E gate on burstSize>=2 so
+            // they'll naturally skip this. A future "stack-carry" check can
+            // key on burstSize==0 + cycleMs==0.
+            TotemCycle sc = new TotemCycle(++inv.cycleSeq, 0.0, 0.0,
+                    new double[0], 0, false, popNs, popNs);
+            inv.cycles.addLast(sc);
+            while (inv.cycles.size() > CYCLE_CAP) inv.cycles.removeFirst();
+            inv.cycleActive = false;
+            return;
+        }
+        // Now re-scan strictly within (popNs, burstEndNs] for non-inventory
+        // interactions — these are the real "GUI not open" signal.
+        for (CapturedPacket p : s.log.recent(256)) {
+            if (p.recvNanos < popNs || p.recvNanos > burstEndNs) continue;
             if (p.kind == PacketKind.INTERACT_ENTITY
                     || p.kind == PacketKind.BLOCK_PLACE
                     || p.kind == PacketKind.USE_ITEM
@@ -91,7 +124,6 @@ public final class TotemCycleProcessor {
                 interactedWhileOpen = true;
             }
         }
-        if (burst.isEmpty()) return;                    // stack carry → never built
 
         burst.sort(Comparator.comparingLong(a -> a.recvNanos));
         long firstNs = burst.get(0).recvNanos;
