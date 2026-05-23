@@ -85,19 +85,23 @@ public final class AirPlaceCheck extends SimCheck {
 
             Block clicked = w.getBlockAt(bx, by, bz);
             if (clicked == null) continue;
-            // Vanilla allows place against any block that has a collision shape
-            // OR is replaceable (fluid, snow layer, grass, etc., where the new
-            // block replaces it). Treat liquids/air as "no support".
-            boolean clickedSolid = clicked.getType().isSolid() && !clicked.isLiquid();
-            if (clickedSolid) continue;
+            // ONLY actual AIR makes a packet "air-place". Cobweb / grass /
+            // snow layer / lily pad / fluids (water/lava) are all vanilla-
+            // REPLACEABLE blocks — vanilla allows placing against them (the
+            // new block replaces them) and the client legitimately sends a
+            // PLAYER_BLOCK_PLACEMENT with the replaceable block as the
+            // clicked position. Previous version (`!isSolid()`) false-flagged
+            // exactly these — placing water with a bucket on a cobweb said
+            // "AirPlace". Air is the only case the cheat forges.
+            if (!clicked.getType().isAir()) continue;
 
-            // Forged face: the clicked block is air/fluid. Confirm on streak —
-            // a single packet in the middle of a chunk reload race shouldn't
-            // flag, but a sustained sequence is conclusive AirPlace.
+            // Forged face: the clicked block is actual AIR (nothing to click
+            // against). Confirm on streak — a single packet in a chunk-reload
+            // race shouldn't flag, but a sustained sequence is conclusive.
             if (diverge(ctx, cfgD("score", 5.0), cfgD("threshold", 9.0),
                     cfgI("min-streak", 2),
-                    String.format("place @%d,%d,%d clicked face is %s (air-place)",
-                            bx, by, bz, clicked.getType()), false)) {
+                    String.format("place @%d,%d,%d clicked face is AIR (air-place)",
+                            bx, by, bz), false)) {
                 // No combat-cancel needed; placement is the harm. Rolling back
                 // the placed block at the server is the actual prevention, but
                 // requires deeper hooks; flagging + punishment pipeline is the

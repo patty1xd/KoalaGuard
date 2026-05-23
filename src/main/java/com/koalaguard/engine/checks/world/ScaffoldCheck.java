@@ -45,6 +45,8 @@ public final class ScaffoldCheck extends SimCheck {
     private static final class S {
         long lastSeq = Long.MIN_VALUE;
         long lastPlaceTick = Long.MIN_VALUE;
+        Float lastYaw = null, lastPitch = null;
+        int identicalRotStreak;
         final Deque<Long> intervals = new ArrayDeque<>();
         final Deque<Double> pitches = new ArrayDeque<>();
     }
@@ -148,6 +150,30 @@ public final class ScaffoldCheck extends SimCheck {
                     bad += cfgD("tower-score", 4.0);
                     why.append("tower ");
                 }
+            }
+
+            // ─── Grim lastRot bypass ───
+            // A scaffold that hides from rotation-update checks reuses the
+            // LAST KNOWN rotation across multiple placements — the place
+            // packet's stamped yaw/pitch is bit-exact identical to the prior
+            // place. Vanilla micro-jitter ALWAYS perturbs the rotation
+            // between actions; literal identity across 3+ consecutive places
+            // is the Grim-bypass fingerprint.
+            float placeYaw = p.hasRot ? p.yaw : (float) el[3];
+            float placePitch = p.hasRot ? p.pitch : (float) el[4];
+            if (s.lastYaw != null && s.lastPitch != null
+                    && Float.compare(placeYaw, s.lastYaw) == 0
+                    && Float.compare(placePitch, s.lastPitch) == 0) {
+                s.identicalRotStreak++;
+            } else {
+                s.identicalRotStreak = 0;
+            }
+            s.lastYaw = placeYaw;
+            s.lastPitch = placePitch;
+            if (s.identicalRotStreak >= cfgI("lastrot-streak", 3)) {
+                bad += cfgD("lastrot-score", 6.0);
+                why.append(String.format("lastRot bypass: rotation unchanged across %d places ",
+                        s.identicalRotStreak + 1));
             }
 
             // Sample cadence + pitch for S2.

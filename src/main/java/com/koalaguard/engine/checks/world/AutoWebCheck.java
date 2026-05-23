@@ -4,17 +4,12 @@ import com.koalaguard.KoalaGuard;
 import com.koalaguard.check.CheckCategory;
 import com.koalaguard.engine.check.CheckContext;
 import com.koalaguard.engine.check.SimCheck;
-import com.koalaguard.engine.packet.CapturedPacket;
-import com.koalaguard.engine.packet.PacketKind;
-import com.koalaguard.engine.state.PositionFrame;
-import com.koalaguard.engine.util.Combat;
+import com.koalaguard.engine.state.PlayerState;
 import com.koalaguard.util.MathUtil;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.util.Vector;
 
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
@@ -22,41 +17,39 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * AutoWeb — automatic cobweb placement in combat. Two distinct geometric
- * signatures, each on its own gate (web is now flagged whether it's used
- * offensively on the enemy OR defensively on the user themselves):
+ * AutoWeb — automatic cobweb placement in combat.
  *
- *  S0  SELF-WEB without looking down. The legit way to web your own feet
- *      requires looking straight down (pitch ≳ 60°). An AutoWeb cheat fires
- *      while the user keeps the camera level / forward to keep fighting — the
- *      placement is at the user's own position but the reconstructed pitch
- *      is nowhere near the floor. Geometry that no human can produce.
+ * Data source: the SERVER-AUTHORITATIVE block-place ring filled by
+ * BukkitStateListener.onBlockPlace at MONITOR. The previous version read
+ * {@code inv.mainHand} from the once-per-tick inventory mirror, which a
+ * swap-in / place / swap-back cheat completes inside ONE client tick — so
+ * the mirror snapshot showed the weapon, not the cobweb, and the cheat
+ * silently bypassed every check that gated on "holdingWeb". The place ring
+ * captures the ACTUAL placed material plus the player's location+pitch at
+ * the place instant, regardless of whether the cheat swapped back.
  *
- *  S1  OPPONENT-WEB. A cobweb placed AT (or right on top of) an enemy
- *      player's position. Legit play does not bridge a cobweb into a moving
- *      enemy — that is the offensive autoweb signature. The proximity is
- *      checked against the enemy's REWOUND hitbox via TargetTracker when
- *      available, so the test is desync-tolerant.
+ * Two distinct geometric signatures, both gated on cobweb specifically:
  *
- *  S2  POST-ATTACK web. A cobweb placed within a few ticks of an attack on
- *      a nearby player (the place is bound to the fight, not to building).
- *      Adds score on top of S0/S1 — does NOT flag standalone.
+ *  S0  SELF-WEB without looking down. Cobweb placed within {@code self-radius}
+ *      of the attacker's own position WHILE their pitch is not steeply down.
+ *      Legit self-webbing requires looking at your feet (pitch ≳ 55°). The
+ *      cheat keeps the camera level to keep fighting forward — that geometry
+ *      no human produces.
  *
- *  S3  MACHINE CADENCE. Near-constant tick interval between consecutive web
- *      placements. CORROBORATES S0/S1; never standalone (a legit fast trapper
- *      can have rhythm).
+ *  S1  OPPONENT-WEB. Cobweb placed on or adjacent to an enemy player's
+ *      hitbox (rewound via TargetTracker when available so victim desync
+ *      can't mask the proximity).
  *
- * FP-safe: a builder placing webs at a mob farm has no enemy in combat
- * radius (S1 / S2 / S3 dormant), and webbing themselves intentionally
- * involves looking down (S0 dormant). The signals only line up for an
- * automated combat web.
+ * Both S0 and S1 require an enemy in {@code combat-radius} of the attacker
+ * so a non-combat web is never flagged; cadence + post-attack corroborate
+ * only (never standalone).
  */
 public final class AutoWebCheck extends SimCheck {
 
     private static final class S {
-        long lastSeq = Long.MIN_VALUE;
-        long lastWebTick = Long.MIN_VALUE;
-        final Deque<Long> intervals = new ArrayDeque<>();
+        long lastSeenPlaceNanos = Long.MIN_VALUE;
+        long lastWebNanos = Long.MIN_VALUE;
+        final Deque<Long> intervalsMs = new ArrayDeque<>();
     }
 
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
@@ -71,54 +64,41 @@ public final class AutoWebCheck extends SimCheck {
         UUID id = ctx.data.getUuid();
         S s = state.computeIfAbsent(id, k -> new S());
 
-        boolean holdingWeb = ctx.state.inv.mainHand == Material.COBWEB
-                || ctx.state.inv.offHand == Material.COBWEB;
+        double combatR  = cfgD("combat-radius", 5.0);
+        double selfR    = cfgD("self-radius", 1.6);
+        double enemyR   = cfgD("enemy-radius", 1.6);
+        double minLookDown = cfgD("self-min-look-down-pitch", 55.0);
+        long postAtkWindowNs = cfgL("post-attack-window-ns", 400_000_000L);
 
-        List<CapturedPacket> recent = ctx.state.log.recent(96);
-        List<CapturedPacket> chrono = new ArrayList<>(recent);
-        java.util.Collections.reverse(chrono);
-
-        long maxSeen = s.lastSeq;
         double bad = 0;
         StringBuilder why = new StringBuilder();
+        long maxSeen = s.lastSeenPlaceNanos;
 
-        double atkWindow = cfgI("attack-window-ticks", 4);
-        double combatR = cfgD("combat-radius", 5.0);
-        double selfR   = cfgD("self-radius", 1.6);    // place within this of attacker = "on self"
-        double enemyR  = cfgD("enemy-radius", 1.6);   // place within this of enemy = "on enemy"
-        double minLookDown = cfgD("self-min-look-down-pitch", 55.0);
-        double maxOffAngle = cfgD("max-angle", 55.0);
+        List<PlayerState.PlaceRecord> places = ctx.state.recentPlaces(20);
+        for (PlayerState.PlaceRecord r : places) {
+            if (r.nanos > maxSeen) maxSeen = r.nanos;
+            if (r.nanos <= s.lastSeenPlaceNanos) continue;
+            if (r.material != Material.COBWEB) continue;
 
-        for (CapturedPacket p : chrono) {
-            if (p.kind != PacketKind.BLOCK_PLACE || !p.hasPos) continue;
-            if (p.seq > maxSeen) maxSeen = p.seq;
-            if (p.seq <= s.lastSeq) continue;
-            if (!holdingWeb) continue;
+            double placeCX = r.bx + 0.5;
+            double placeCY = r.by + 0.5;
+            double placeCZ = r.bz + 0.5;
 
-            // True client rotation at the place instant (packet-stamped, not
-            // the lagged frame rotation).
-            PositionFrame f = ctx.state.frameAtOrBefore(p.tickIndex);
-            double[] el = Combat.eyeLook(f, p, ctx.player);
-            double ex = el[0], ey = el[1], ez = el[2];
-            float yaw = (float) el[3], pitch = (float) el[4];
-
-            double placeCX = p.x + 0.5, placeCY = p.y + 0.5, placeCZ = p.z + 0.5;
-
-            // Attacker's reconstructed position (feet). When no frame exists
-            // fall back to the live location — the attacker IS still and the
-            // server position matches.
-            double ax, ay, az;
-            if (f != null) { ax = f.x; ay = f.y; az = f.z; }
-            else { var l = ctx.player.getLocation(); ax = l.getX(); ay = l.getY(); az = l.getZ(); }
+            // Attacker position at the place instant (captured by the event).
+            double ax = r.px, ay = r.py, az = r.pz;
+            float pitch = r.pPitch;
 
             double dxSelf = placeCX - ax, dySelf = placeCY - ay, dzSelf = placeCZ - az;
             double distToSelf = Math.sqrt(dxSelf * dxSelf + dySelf * dySelf + dzSelf * dzSelf);
 
+            // Find enemy proximity to the placement (combat-gate + S1 target).
             boolean enemyInCombat = false;
             Player nearestEnemy = null;
             double nearestEnemyDist = Double.MAX_VALUE;
             for (Player o : ctx.player.getWorld().getPlayers()) {
                 if (o == ctx.player) continue;
+                if (o.getGameMode() == org.bukkit.GameMode.SPECTATOR
+                        || o.getGameMode() == org.bukkit.GameMode.CREATIVE) continue;
                 double dx = o.getLocation().getX() - placeCX;
                 double dy = o.getLocation().getY() - placeCY;
                 double dz = o.getLocation().getZ() - placeCZ;
@@ -127,29 +107,25 @@ public final class AutoWebCheck extends SimCheck {
                 double d = Math.sqrt(dSq);
                 if (d < nearestEnemyDist) { nearestEnemyDist = d; nearestEnemy = o; }
             }
+            if (!enemyInCombat) continue;        // non-combat web — not the cheat
 
             // ─── S0 — SELF-WEB without looking down ───
-            // Cobweb placed at (or right next to) the attacker's own position
-            // while their pitch is NOT down. Pitch up to 90 = straight down,
-            // so anything below ~55° is "not looking at feet". Gated by an
-            // enemy actually being in combat range so a player webbing
-            // themselves to escape (which is legit if they look down) AND a
-            // builder placing in a void area both pass cleanly.
-            if (distToSelf < selfR && enemyInCombat && pitch < minLookDown) {
+            if (distToSelf < selfR && pitch < minLookDown) {
                 bad += cfgD("self-web-score", 7.0);
                 why.append(String.format("self-web no look-down (pitch=%.0f° dist=%.2f) ",
                         pitch, distToSelf));
             }
 
-            // ─── S1 — OPPONENT-WEB ───
-            // Cobweb placed directly on or alongside an enemy. Uses the
-            // rewound enemy hitbox when available so victim desync can't
-            // mask the proximity.
+            // ─── S1 — OPPONENT-WEB (cobweb at enemy hitbox) ───
             if (nearestEnemy != null) {
                 double enemyHitDist = nearestEnemyDist;
-                double[] box = ctx.state.targets.boxAt(nearestEnemy.getEntityId(), p.recvNanos);
+                double[] box = ctx.state.targets.boxAt(nearestEnemy.getEntityId(), r.nanos);
                 if (box != null) {
-                    enemyHitDist = Combat.distanceToBox(placeCX, placeCY, placeCZ, box);
+                    // closest point on the rewound box to the placement centre
+                    double dx = Math.max(Math.max(box[0] - placeCX, 0), placeCX - box[3]);
+                    double dy = Math.max(Math.max(box[1] - placeCY, 0), placeCY - box[4]);
+                    double dz = Math.max(Math.max(box[2] - placeCZ, 0), placeCZ - box[5]);
+                    enemyHitDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                 }
                 if (enemyHitDist < enemyR) {
                     bad += cfgD("opponent-web-score", 7.0);
@@ -158,63 +134,39 @@ public final class AutoWebCheck extends SimCheck {
                 }
             }
 
-            // ─── S2 — generic aim-off web while enemy is in combat range ───
-            // Same as the old S0 — kept as a backstop for "place at random
-            // spot in the fight that we couldn't classify as self or enemy".
-            if (enemyInCombat && distToSelf >= selfR
-                    && (nearestEnemy == null || nearestEnemyDist >= enemyR)) {
-                double tx = placeCX - ex, ty = placeCY - ey, tz = placeCZ - ez;
-                double dist = Math.sqrt(tx * tx + ty * ty + tz * tz);
-                if (dist >= 0.1) {
-                    Vector look = Combat.lookVector(yaw, pitch);
-                    double dot = (look.getX() * tx + look.getY() * ty + look.getZ() * tz) / dist;
-                    double angle = Math.toDegrees(Math.acos(MathUtil.clampD(dot, -1, 1)));
-                    if (angle > maxOffAngle) {
-                        bad += cfgD("aim-score", 5.0);
-                        why.append(String.format("aim-off %.0f° ", angle));
-                    }
-                }
+            // ─── S2 — post-attack web (CORROBORATING) ───
+            // Within ~400ms of the attacker's last attack-entity packet.
+            long sinceAtkNs = r.nanos - ctx.state.combat.lastAttackNanos;
+            if (sinceAtkNs >= 0 && sinceAtkNs <= postAtkWindowNs) {
+                bad += cfgD("combat-score", 5.0);
+                why.append("post-attack web ");
             }
 
-            // ─── S3 — post-attack web (CORROBORATING) ───
-            if (enemyInCombat) {
-                boolean afterAttack = false;
-                for (CapturedPacket q : recent) {
-                    if (q.kind != PacketKind.INTERACT_ENTITY) continue;
-                    if (!String.valueOf(q.objA).contains("ATTACK")) continue;
-                    long dt = p.tickIndex - q.tickIndex;
-                    if (dt >= 0 && dt <= atkWindow) { afterAttack = true; break; }
-                }
-                if (afterAttack) {
-                    bad += cfgD("combat-score", 5.0);
-                    why.append("post-attack web ");
+            // Cadence sample (only counted when a real S0/S1 hit fired).
+            if (s.lastWebNanos != Long.MIN_VALUE) {
+                long ivMs = (r.nanos - s.lastWebNanos) / 1_000_000L;
+                if (ivMs > 0 && ivMs < 5000) {
+                    s.intervalsMs.addLast(ivMs);
+                    while (s.intervalsMs.size() > cfgI("sample-cap", 20))
+                        s.intervalsMs.removeFirst();
                 }
             }
-
-            // Cadence sampling for S4.
-            if (s.lastWebTick != Long.MIN_VALUE) {
-                long iv = p.tickIndex - s.lastWebTick;
-                if (iv > 0 && iv < 200) {
-                    s.intervals.addLast(iv);
-                    while (s.intervals.size() > cfgI("sample-cap", 20)) s.intervals.removeFirst();
-                }
-            }
-            s.lastWebTick = p.tickIndex;
+            s.lastWebNanos = r.nanos;
         }
-        s.lastSeq = maxSeen;
+        s.lastSeenPlaceNanos = maxSeen;
 
-        // ─── S4 — machine cadence (CORROBORATING) ───
-        if (bad > 0 && s.intervals.size() >= cfgI("min-samples", 6)) {
-            double sd = MathUtil.standardDeviation(s.intervals);
-            if (sd < cfgD("max-sd-interval", 0.9)) {
+        // ─── S3 — machine cadence (CORROBORATING) ───
+        if (bad > 0 && s.intervalsMs.size() >= cfgI("min-samples", 6)) {
+            double sd = MathUtil.standardDeviation(s.intervalsMs);
+            if (sd < cfgD("max-sd-interval-ms", 35.0)) {
                 bad += cfgD("cadence-score", 6.0);
-                why.append(String.format("machine cadence sd=%.2f n=%d ",
-                        sd, s.intervals.size()));
+                why.append(String.format("machine cadence sd=%.0fms n=%d ",
+                        sd, s.intervalsMs.size()));
             }
         }
 
         if (bad > 0) {
-            if (diverge(ctx, bad, cfgD("threshold", 10.0), cfgI("min-streak", 3),
+            if (diverge(ctx, bad, cfgD("threshold", 10.0), cfgI("min-streak", 2),
                     "autoweb :: " + why.toString().trim(), false)) {
                 armCombatCancel(ctx);
             }
