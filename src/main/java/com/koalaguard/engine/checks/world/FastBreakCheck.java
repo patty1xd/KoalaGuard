@@ -147,7 +147,10 @@ public final class FastBreakCheck extends SimCheck {
             var fat = p.getPotionEffect(PotionEffectType.MINING_FATIGUE);
             if (fat != null) speed *= Math.pow(0.3, fat.getAmplifier() + 1);
         } catch (Throwable ignored) { }
-        if (p.isInWater() && !hasAquaAffinity(p)) speed /= 5.0;
+        // Conduit Power grants effective Aqua Affinity (no underwater /5
+        // penalty). Without this check, expected break time was 5x too high
+        // for any conduit user and FastBreak silently missed real cheats.
+        if (p.isInWater() && !hasAquaAffinity(p) && !hasConduitPower(p)) speed /= 5.0;
         if (!p.isOnGround()) speed /= 5.0;
 
         if (speed >= hardness * 30.0) return 50.0;            // legitimate insta-mine
@@ -166,24 +169,55 @@ public final class FastBreakCheck extends SimCheck {
                     || b.contains("IRON") || b.contains("GOLD") || b.contains("COPPER")
                     || b.contains("ANCIENT_DEBRIS") || b.equals("OBSIDIAN")
                     || b.equals("ANDESITE") || b.equals("DIORITE") || b.equals("GRANITE")
-                    || b.equals("DEEPSLATE") || b.contains("NETHERITE") || b.contains("BRICKS");
+                    || b.equals("DEEPSLATE") || b.contains("NETHERITE") || b.contains("BRICKS")
+                    // 1.17+ deepslate / dripstone / amethyst / 1.20+ tuff / 1.21
+                    || b.equals("TUFF") || b.equals("CALCITE") || b.equals("BASALT")
+                    || b.equals("SMOOTH_BASALT") || b.equals("BLACKSTONE")
+                    || b.contains("DRIPSTONE") || b.contains("AMETHYST")
+                    || b.contains("ANVIL") || b.contains("CAULDRON")
+                    || b.equals("END_STONE") || b.equals("PURPUR_BLOCK")
+                    || b.contains("QUARTZ") || b.equals("REDSTONE_LAMP")
+                    || b.equals("ICE") || b.equals("PACKED_ICE") || b.equals("BLUE_ICE")
+                    || b.equals("CONCRETE") || b.endsWith("_CONCRETE")
+                    || b.equals("TERRACOTTA") || b.endsWith("_TERRACOTTA");
         }
         if (name.endsWith("_AXE")) {
             return b.endsWith("_LOG") || b.endsWith("_WOOD") || b.endsWith("_PLANKS")
-                    || b.contains("BOOKSHELF") || b.contains("CHEST");
+                    || b.contains("BOOKSHELF") || b.contains("CHEST")
+                    // 1.21 axe-mineable
+                    || b.equals("MELON") || b.equals("PUMPKIN") || b.equals("CARVED_PUMPKIN")
+                    || b.equals("JACK_O_LANTERN") || b.equals("BAMBOO_BLOCK")
+                    || b.equals("STRIPPED_BAMBOO_BLOCK") || b.contains("MUSHROOM_BLOCK")
+                    || b.equals("MUSHROOM_STEM") || b.endsWith("_DOOR") || b.endsWith("_FENCE")
+                    || b.endsWith("_FENCE_GATE") || b.endsWith("_SIGN")
+                    || b.endsWith("_TRAPDOOR") || b.endsWith("_STAIRS")
+                    || b.endsWith("_SLAB") || b.endsWith("_PRESSURE_PLATE")
+                    || b.endsWith("_BUTTON");
         }
         if (name.endsWith("_SHOVEL")) {
             return b.equals("DIRT") || b.equals("GRASS_BLOCK") || b.contains("SAND")
                     || b.contains("GRAVEL") || b.equals("SNOW") || b.equals("SNOW_BLOCK")
                     || b.equals("CLAY") || b.equals("MUD") || b.equals("PODZOL")
-                    || b.equals("MYCELIUM") || b.equals("SOUL_SAND") || b.equals("SOUL_SOIL");
+                    || b.equals("MYCELIUM") || b.equals("SOUL_SAND") || b.equals("SOUL_SOIL")
+                    || b.equals("DIRT_PATH") || b.equals("ROOTED_DIRT")
+                    || b.equals("COARSE_DIRT") || b.equals("FARMLAND")
+                    || b.equals("RED_SAND") || b.equals("MUDDY_MANGROVE_ROOTS")
+                    || b.endsWith("POWDER_SNOW");
         }
         if (name.endsWith("_HOE")) {
             return b.contains("LEAVES") || b.equals("HAY_BLOCK") || b.equals("TARGET")
-                    || b.contains("SPONGE");
+                    || b.contains("SPONGE")
+                    // 1.21 hoe-mineable
+                    || b.equals("MOSS_BLOCK") || b.equals("MOSS_CARPET")
+                    || b.equals("PALE_MOSS_BLOCK") || b.equals("PALE_MOSS_CARPET")
+                    || b.equals("NETHER_WART_BLOCK") || b.equals("WARPED_WART_BLOCK")
+                    || b.equals("SHROOMLIGHT") || b.contains("SCULK")
+                    || b.equals("DRIED_KELP_BLOCK");
         }
         if (name.equals("SHEARS")) {
-            return b.contains("LEAVES") || b.contains("WOOL") || b.contains("COBWEB");
+            return b.contains("LEAVES") || b.contains("WOOL") || b.contains("COBWEB")
+                    || b.equals("VINE") || b.equals("GLOW_LICHEN") || b.contains("CARPET")
+                    || b.contains("HANGING_ROOTS") || b.equals("NETHER_SPROUTS");
         }
         return false;
     }
@@ -204,6 +238,12 @@ public final class FastBreakCheck extends SimCheck {
         try {
             ItemStack helm = p.getInventory().getHelmet();
             return helm != null && helm.getEnchantmentLevel(Enchantment.AQUA_AFFINITY) > 0;
+        } catch (Throwable t) { return false; }
+    }
+
+    private static boolean hasConduitPower(Player p) {
+        try {
+            return p.hasPotionEffect(org.bukkit.potion.PotionEffectType.CONDUIT_POWER);
         } catch (Throwable t) { return false; }
     }
 

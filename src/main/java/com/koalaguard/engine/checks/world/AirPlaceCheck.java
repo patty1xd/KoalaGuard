@@ -69,17 +69,27 @@ public final class AirPlaceCheck extends SimCheck {
 
             int bx = (int) p.x, by = (int) p.y, bz = (int) p.z;
 
-            // Was a START_DIGGING for THIS exact block sent in the last ~250ms?
-            // (The MC-279849 same-tick break-and-replace race.) If so, the
-            // packet's "clicked block" was momentarily solid before the air
-            // window we now observe — give it a pass.
+            // Was a START_DIGGING for THIS exact block OR FOR A GRAVITY BLOCK
+            // DIRECTLY ABOVE sent in the last ~250ms? The vanilla gravity race
+            // (sand/gravel/anvil): player breaks the bottom of a stack, the
+            // block above falls into the gap (no packet from the player), and
+            // the player places into the now-air position — clicked is air at
+            // the place coords but no dig at THOSE coords. Extending the probe
+            // to include digging at (bx, by+1, bz) and (bx, by+2, bz) covers
+            // it. Plus: any dig in the same tick within a 1-block sphere
+            // counts (covers the FINISHED_DIGGING + falling-block-collapse
+            // sequence).
             boolean justBroken = false;
             for (CapturedPacket q : chrono) {
                 if (q.kind != PacketKind.DIGGING) continue;
                 if (!"START_DIGGING".equals(q.strA) && !"FINISHED_DIGGING".equals(q.strA)) continue;
                 if (!q.hasPos) continue;
-                if ((int) q.x != bx || (int) q.y != by || (int) q.z != bz) continue;
-                if (Math.abs(p.recvNanos - q.recvNanos) <= breakGraceNs) { justBroken = true; break; }
+                int qx = (int) q.x, qy = (int) q.y, qz = (int) q.z;
+                int dx = qx - bx, dy = qy - by, dz = qz - bz;
+                if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1 && dy >= -1 && dy <= 2
+                        && Math.abs(p.recvNanos - q.recvNanos) <= breakGraceNs) {
+                    justBroken = true; break;
+                }
             }
             if (justBroken) continue;
 

@@ -92,10 +92,19 @@ public final class AutoWebCheck extends SimCheck {
             double distToSelf = Math.sqrt(dxSelf * dxSelf + dySelf * dySelf + dzSelf * dzSelf);
 
             // Find enemy proximity to the placement (combat-gate + S1 target).
+            // Use the bounded-radius getNearbyEntities (Bukkit AABB) so we do
+            // NOT iterate every player in the world per PlaceRecord — the
+            // previous O(places × world_players) scan was a DoS vector when a
+            // cheater place-spammed on a populated server.
             boolean enemyInCombat = false;
             Player nearestEnemy = null;
             double nearestEnemyDist = Double.MAX_VALUE;
-            for (Player o : ctx.player.getWorld().getPlayers()) {
+            double scanR = Math.max(combatR, enemyR) + 0.5;
+            for (org.bukkit.entity.Entity ent :
+                    ctx.player.getWorld().getNearbyEntities(
+                            new org.bukkit.Location(ctx.player.getWorld(), placeCX, placeCY, placeCZ),
+                            scanR, scanR, scanR)) {
+                if (!(ent instanceof Player o)) continue;
                 if (o == ctx.player) continue;
                 if (o.getGameMode() == org.bukkit.GameMode.SPECTATOR
                         || o.getGameMode() == org.bukkit.GameMode.CREATIVE) continue;

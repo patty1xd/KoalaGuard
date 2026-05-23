@@ -156,11 +156,22 @@ public final class ScaffoldCheck extends SimCheck {
             // A scaffold that hides from rotation-update checks reuses the
             // LAST KNOWN rotation across multiple placements — the place
             // packet's stamped yaw/pitch is bit-exact identical to the prior
-            // place. Vanilla micro-jitter ALWAYS perturbs the rotation
-            // between actions; literal identity across 3+ consecutive places
-            // is the Grim-bypass fingerprint.
+            // place. CAVEAT: a STATIONARY human (mouse not moving — controller
+            // user holding the stick still, AFK-style tower) also sends
+            // bit-identical rotation packets, so we only count this signal
+            // while the player has BEEN moving their view recently. Use the
+            // rotation history's last few yaw deltas as the "looked recently"
+            // signal; if the player has visibly moved their camera, any
+            // identical-rotation streak across places is the cheat.
             float placeYaw = p.hasRot ? p.yaw : (float) el[3];
             float placePitch = p.hasRot ? p.pitch : (float) el[4];
+            boolean cameraMoved = false;
+            for (Float dy : ctx.state.yawDeltas(12)) {
+                if (Math.abs(dy) > 0.6f) { cameraMoved = true; break; }
+            }
+            for (Float dp : ctx.state.pitchDeltas(12)) {
+                if (Math.abs(dp) > 0.6f) { cameraMoved = true; break; }
+            }
             if (s.lastYaw != null && s.lastPitch != null
                     && Float.compare(placeYaw, s.lastYaw) == 0
                     && Float.compare(placePitch, s.lastPitch) == 0) {
@@ -170,7 +181,11 @@ public final class ScaffoldCheck extends SimCheck {
             }
             s.lastYaw = placeYaw;
             s.lastPitch = placePitch;
-            if (s.identicalRotStreak >= cfgI("lastrot-streak", 3)) {
+            // Off-by-one fix: streak counts MATCHES, so N matches = N+1
+            // consecutive identical-rot places. Require (streak+1) >= configured
+            // place count, so `lastrot-streak=3` means "3 consecutive identical".
+            int needPlaces = cfgI("lastrot-streak", 3);
+            if (cameraMoved && (s.identicalRotStreak + 1) >= needPlaces) {
                 bad += cfgD("lastrot-score", 6.0);
                 why.append(String.format("lastRot bypass: rotation unchanged across %d places ",
                         s.identicalRotStreak + 1));

@@ -39,19 +39,33 @@ public final class NukerCheck extends SimCheck {
         }
         if (newest < 0) { clean(ctx, 0.5); return; }
 
-        int digs = 0;
+        // Count DISTINCT block coordinates broken in the window. A legitimate
+        // Efficiency-V + Haste-II insta-mine emits START_DIGGING +
+        // FINISHED_DIGGING for the SAME block back-to-back (2 packets/block),
+        // so 4 instabroken blocks = 8 packets — the old packet-count limit
+        // FP'd on that. Counting distinct (x,y,z) preserves the "many blocks
+        // in one tick" semantic without flagging fast sequential mining.
+        java.util.HashSet<Long> coords = new java.util.HashSet<>();
+        int packets = 0;
         for (CapturedPacket p : recent) {
             if (p.kind == PacketKind.DIGGING
                     && ("START_DIGGING".equals(p.strA) || "FINISHED_DIGGING".equals(p.strA))
                     && newest - p.recvNanos <= windowNs) {
-                digs++;
+                packets++;
+                if (p.hasPos) {
+                    coords.add(((long) (int) p.x << 40)
+                             ^ ((long) (int) p.y << 20)
+                             ^ ((long) (int) p.z));
+                }
             }
         }
+        int distinct = coords.isEmpty() ? packets : coords.size();
 
-        if (digs >= limit) {
-            diverge(ctx, (digs - limit + 1) * cfgD("score-scale", 4.0),
+        if (distinct >= limit) {
+            diverge(ctx, (distinct - limit + 1) * cfgD("score-scale", 4.0),
                     cfgD("threshold", 10.0), cfgI("min-streak", 2),
-                    digs + " block-break packets within one tick", false);
+                    distinct + " distinct blocks broken in one tick ("
+                            + packets + " digging packets)", false);
         } else {
             clean(ctx, 1.0);
         }
