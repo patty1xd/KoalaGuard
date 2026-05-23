@@ -52,27 +52,44 @@ public final class TimerCheck extends SimCheck {
         int window = cfgI("window-ticks", 60);
         if (w.accConf < window) return;
 
-        double ratio = (double) w.accFrames / (double) w.accConf;
-        double eps = cfgD("max-ratio-excess", 0.18);
+        // KEY GATE: s.tick (the movement-tick counter) FREEZES while the
+        // player is stationary (rotation-only packets create no PositionFrame,
+        // so `tick - baseTick` accumulates ZERO frames per server tick). A
+        // ratio-based comparison vs confirmed-transactions therefore gives
+        // ratio = 0 for any non-moving player. The previous slow-timer
+        // variant was triggering on EVERY standing-still player and on
+        // anyone moving sparsely — that's why it false-alerts for "doing
+        // literally anything". Only evaluate when we have enough MOVEMENT
+        // frames in the window for the ratio to be meaningful.
+        int minMoveFrames = cfgI("min-move-frames", 30);
+        long accFrames = w.accFrames;
+        long accConf   = w.accConf;
         w.accConf = 0; w.accFrames = 0;
+
+        if (accFrames < minMoveFrames) {
+            // Player isn't actively moving — timer-by-frame-ratio is undefined.
+            // Reset the accumulator and bleed off any prior score so the
+            // window doesn't carry stale data into a fight.
+            clean(ctx, 3.0);
+            return;
+        }
+
+        double ratio = (double) accFrames / (double) accConf;
+        double eps = cfgD("max-ratio-excess", 0.18);
 
         if (ratio > 1.0 + eps) {
             diverge(ctx, (ratio - 1.0) * cfgD("score-scale", 40.0),
                     cfgD("threshold", 10.0), cfgI("min-streak", 2),
                     String.format("tick ratio %.3f over %d server ticks (fast timer)", ratio, window), true);
-        } else if (cfgB("detect-slow-timer", true)
-                && ratio > 0 && ratio < 1.0 - cfgD("max-slow-ratio", 0.20)) {
-            // SLOW timer: the client deliberately runs slow so movement
-            // packets arrive less often than server ticks — a kind of mini-
-            // blink that lets the player "skip" damage windows or animation
-            // checks without a burst on release. Wurst's slow-timer + various
-            // LB modes use it for projectile-dodge or shield abuse. Vanilla
-            // packet loss / lag spikes also produce low ratios — guarded by
-            // the lag model unstability gate above and a generous threshold.
-            diverge(ctx, (1.0 - ratio) * cfgD("slow-score-scale", 40.0),
-                    cfgD("threshold", 10.0), cfgI("min-streak", 3),
-                    String.format("tick ratio %.3f over %d server ticks (slow timer)", ratio, window), true);
         } else {
+            // Slow-timer detection is deliberately NOT done here — movement-
+            // tick-count vs confirmed-transactions intrinsically goes below
+            // 1.0 for any player whose FPS is below the server rate, for
+            // anyone walking-and-stopping, and for anyone with packet jitter.
+            // It's not a usable signal at the engine's metric level. A real
+            // slow-timer cheat is rare and easier to spot via late attacks /
+            // late inventory clicks; falsely flagging legit play here is the
+            // bigger harm.
             clean(ctx, 3.0);
         }
     }

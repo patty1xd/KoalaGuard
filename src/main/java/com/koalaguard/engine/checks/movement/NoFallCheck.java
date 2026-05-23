@@ -57,6 +57,22 @@ public final class NoFallCheck extends SimCheck {
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 12.0),
                     cfgI("min-streak", 2),
                     String.format("onGround spoof after %.1f-block fall", acc), true);
+        } else if (acc > cfgD("min-fall", 3.2)
+                && f.dy > cfgD("teleport-up-dy", 0.50)
+                && !ctx.state.exGliding
+                && ctx.state.tick - ctx.state.combat.knockbackTick > 6) {
+            // ─── TeleportNoFall ───
+            // After a damaging fall has been accumulated, a frame whose dy is
+            // strongly POSITIVE (>0.5 — well past a vanilla jump that would
+            // need a ground impulse) is a TELEPORT during the fall — the
+            // cheat snaps the player up to "reset" the server's fallDistance.
+            // Excluded: legit knockback (lastVelocityMs grace is up the stack
+            // via ctx.unstable(); plus we double-gate on knockbackTick).
+            diverge(ctx, cfgD("teleport-score", 8.0), cfgD("threshold", 12.0),
+                    cfgI("teleport-min-streak", 1),
+                    String.format("TeleportNoFall: dy=%.2f after %.1f-block fall",
+                            f.dy, acc), true);
+            acc = 0;
         } else {
             if (supported) { acc = 0; clean(ctx, 2.0); }
         }

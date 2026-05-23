@@ -81,16 +81,30 @@ public final class NoSlowCheck extends SimCheck {
         //    sustained near-sprint speed mid-use trips it — humans cannot do
         //    that in vanilla. Catches NoSlowdown / EatHack / BowSpeed across
         //    Wurst, LiquidBounce, Meteor, Sigma.
+        //
+        //    USE-ONSET GRACE: when USE_ITEM is first sent the client doesn't
+        //    immediately clamp velocity — there's a 1-3 tick window where the
+        //    player is still finishing their previous sprint frame. Without a
+        //    grace the check false-alerts on EVERY legit eat-while-sprinting
+        //    that the user pointed out. Wait until the use-session has been
+        //    open for at least `use-grace-ms` before checking.
         boolean usingContinuous = ctx.state.usingItem
                 && (isContinuousUse(ctx.state.inv.mainHand)
                  || isContinuousUse(ctx.state.inv.offHand));
         if (usingContinuous) {
+            long useGraceMs = cfgL("use-grace-ms", 350L);
+            long useAgeMs = (System.nanoTime() - ctx.state.usingItemSinceNanos) / 1_000_000L;
+            if (useAgeMs < useGraceMs) {
+                // Just started using — let the vanilla velocity clamp catch up
+                // before we judge. No clean/dirty either way; neutral tick.
+                return;
+            }
             double cap = cfgD("max-use-speed", 0.15);
             if (h > cap) {
                 diverge(ctx, (h - cap) * cfgD("use-score-scale", 30.0),
                         cfgD("threshold", 9.0), cfgI("use-min-streak", 6),
-                        String.format("use-item speed %.3f > %.2f (using %s)",
-                                h, cap, ctx.state.inv.mainHand), true);
+                        String.format("use-item speed %.3f > %.2f (using %s for %dms)",
+                                h, cap, ctx.state.inv.mainHand, useAgeMs), true);
                 return;
             }
         }
