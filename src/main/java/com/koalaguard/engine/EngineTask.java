@@ -174,7 +174,34 @@ public final class EngineTask extends BukkitRunnable {
         }
 
         if (Math.abs(dx) > 8 || Math.abs(dy) > 8 || Math.abs(dz) > 8) {
-            // ungraced teleport / world move — reset baseline, don't evaluate
+            // A >8-block single-tick displacement. This used to ALWAYS just
+            // reset baseline and skip evaluation — which is exactly how
+            // .vclip/.tp/backstab-teleport variants evaded ALL checks (the
+            // move was eaten before any frame check ever saw it).
+            //
+            // Fix: if NO server-initiated teleport / pearl / velocity grace
+            // is active, treat the move itself as a clip event (open-air
+            // teleport) and stamp clipSeq so ClipCheck rubber-bands. The
+            // path-through-solid case (CollisionEngine.solidOnSegment above)
+            // already stamps for narrow clips through walls — this catches
+            // the bigger free-space teleport that doesn't traverse solid.
+            if (evaluate && !d.setbackPending) {
+                long now = System.currentTimeMillis();
+                boolean graced = now - d.lastTeleportMs    < 1500
+                              || now - d.lastRespawnMs     < 2500
+                              || now - d.lastWorldChangeMs < 4000
+                              || now - d.lastVelocityMs    < 1500
+                              || now - d.joinMs            < 3500;
+                boolean specialMove = s.exVehicle || s.exGliding || s.exRiptide
+                                   || s.exLevitation;
+                if (!graced && !specialMove) {
+                    d.clipSeq++;
+                    d.clipDetail = String.format(
+                            "ungraced >8-block teleport (dx=%.1f dy=%.1f dz=%.1f), no server teleport",
+                            dx, dy, dz);
+                }
+            }
+            // reset baseline so reconstruction can resume on the next packet
             s.prevX = x; s.prevY = y; s.prevZ = z;
             s.prevYaw = yaw; s.prevPitch = pitch;
             return false;
