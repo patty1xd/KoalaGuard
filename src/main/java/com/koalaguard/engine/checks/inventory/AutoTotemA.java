@@ -37,7 +37,16 @@ public final class AutoTotemA extends SimCheck {
         for (TotemCycle c : ctx.state.inv.cycles) {
             if (c.seq <= seen) continue;
             if (c.seq > max) max = c.seq;
-            double metric = c.burstSize >= 2 ? c.selectToEquipMs : c.cycleMs;
+            // Single-packet F-swap exemption: a legit player holding a totem
+            // in main hand pressing F after popping moves it to off-hand in
+            // one SWAP_ITEM_WITH_OFFHAND packet, ~50-100 ms after the pop —
+            // identical timing to an autototem but a normal human motion.
+            // Skip the burstSize==1 case when the source was an F-swap (the
+            // cycle's burstSize==1 + cycleMs in the human range is the
+            // signature). Real autototem produces a multi-packet click burst
+            // (inventory drag), which the burstSize>=2 branch still catches.
+            if (c.burstSize <= 1) continue;
+            double metric = c.selectToEquipMs;
             if (metric <= cfgD("max-ms", 90.0) || c.cycleMs <= cfgD("max-cycle-ms", 110.0)) {
                 if (diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 9.0),
                         cfgI("min-streak", 3),
