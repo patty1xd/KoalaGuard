@@ -32,7 +32,18 @@ public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
         }
         if (args.length == 0) { help(sender); return true; }
 
-        switch (args[0].toLowerCase()) {
+        // Per-subcommand permissions — `koalaguard.admin` opens the door,
+        // but `unban` / `tp` need explicit grants since the broad `admin`
+        // perm is often handed to deputies who should only see info.
+        String sub = args[0].toLowerCase();
+        if ((sub.equals("unban") || sub.equals("tp"))
+                && !sender.hasPermission("koalaguard.admin." + sub)
+                && !sender.hasPermission("koalaguard.admin.*")) {
+            msg(sender, "Missing permission koalaguard.admin." + sub, NamedTextColor.RED);
+            return true;
+        }
+
+        switch (sub) {
             case "reload" -> {
                 plugin.reloadConfig();
                 plugin.getDiscordBot().reloadConfig();
@@ -45,7 +56,13 @@ public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
                         NamedTextColor.GRAY);
             }
             case "unban" -> {
-                if (args.length < 2) { msg(sender, "Usage: /kg unban <player|uuid>", NamedTextColor.RED); return true; }
+                if (args.length < 2) { msg(sender, "Usage: /kg unban <uuid>", NamedTextColor.RED); return true; }
+                // UUID-only to prevent name-collision unban abuse — accept
+                // canonical UUID-with-dashes only.
+                if (!args[1].matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")) {
+                    msg(sender, "unban requires a canonical UUID (use /kg bans to list).", NamedTextColor.RED);
+                    return true;
+                }
                 boolean ok = plugin.getBanManager().unban(args[1]);
                 msg(sender, ok ? args[1] + " unbanned." : "No ban found for " + args[1] + ".",
                         ok ? NamedTextColor.GREEN : NamedTextColor.RED);
