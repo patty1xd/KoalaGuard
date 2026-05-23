@@ -72,7 +72,7 @@ public final class MultiTaskCheck extends SimCheck {
         long start = ctx.state.usingItemSinceNanos;
         long staleNs = cfgL("use-stale-ms", 30_000L) * 1_000_000L;
 
-        int attacks = 0, placements = 0, drops = 0;
+        int attacks = 0, placements = 0, drops = 0, swaps = 0;
         long maxActionSeq = -1;
         for (CapturedPacket p : ctx.state.log.recent(256)) {
             if (p.recvNanos < start) continue;                 // before this use
@@ -89,6 +89,15 @@ public final class MultiTaskCheck extends SimCheck {
                     && (p.strA.equals("DROP_ITEM") || p.strA.equals("DROP_ALL_ITEMS"))) {
                 drops++;
                 if (p.seq > maxActionSeq) maxActionSeq = p.seq;
+            } else if (p.kind == PacketKind.DIGGING && p.strA != null
+                    && p.strA.equals("SWAP_ITEM_WITH_OFFHAND")) {
+                // Vanilla cancels USE_ITEM the instant F is pressed (offhand
+                // swap aborts the continuous-use animation). Seeing the swap
+                // packet while the session flag is still open is a synthetic
+                // chain — the cheat suppressed the RELEASE_USE_ITEM that
+                // vanilla would have sent.
+                swaps++;
+                if (p.seq > maxActionSeq) maxActionSeq = p.seq;
             }
         }
 
@@ -97,14 +106,15 @@ public final class MultiTaskCheck extends SimCheck {
         // therefore can ONLY be open while none have happened. Any single
         // action mid-session is already vanilla-impossible; threshold is
         // generous to avoid sub-tick race windows.
-        int totalActions = attacks + placements + drops;
+        int totalActions = attacks + placements + drops + swaps;
         int max = cfgI("max-actions-in-use", 2);
         if (totalActions >= max && maxActionSeq > s.reportedSeq) {
             s.reportedSeq = maxActionSeq;
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 9.0),
                     cfgI("min-streak", 2),
                     "actions during uninterrupted item-use: "
-                            + attacks + " attack, " + placements + " place, " + drops + " drop",
+                            + attacks + " attack, " + placements + " place, "
+                            + drops + " drop, " + swaps + " hand-swap",
                     false);
         }
     }
