@@ -8,9 +8,11 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.*;
@@ -466,10 +468,46 @@ public final class BukkitStateListener implements Listener {
         inv.popPending = false;
     }
 
+    /**
+     * Authoritative block-place capture. Stores the ACTUAL placed material +
+     * the player's location & rotation at the place instant into a per-player
+     * ring. AutoWebCheck (and any future place-aware check) reads from this
+     * ring instead of trying to read the spoofable {@code inv.mainHand}
+     * inventory mirror — which a swap-in / place / swap-back cheat clears
+     * before the per-tick mirror runs. Fires at MONITOR so it sees only
+     * actually-accepted placements.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        Player p = event.getPlayer();
+        PlayerData d = plugin.getDataManager().get(p);
+        if (d == null) return;
+        var loc = p.getLocation();
+        var b = event.getBlockPlaced();
+        d.engine.pushPlace(new com.koalaguard.engine.state.PlayerState.PlaceRecord(
+                System.nanoTime(),
+                b.getType(),
+                b.getX(), b.getY(), b.getZ(),
+                loc.getX(), loc.getY(), loc.getZ(),
+                loc.getPitch(), loc.getYaw()));
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRespawn(PlayerRespawnEvent event) {
         PlayerData d = plugin.getDataManager().get(event.getPlayer());
-        if (d != null) { d.lastRespawnMs = System.currentTimeMillis(); d.engine.moveInit = false; }
+        if (d == null) return;
+        long now = System.currentTimeMillis();
+        if (d.lastDeathMs > 0) {
+            d.lastRespawnGapMs = now - d.lastDeathMs;
+        }
+        d.lastRespawnMs = now;
+        d.engine.moveInit = false;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDeath(PlayerDeathEvent event) {
+        PlayerData d = plugin.getDataManager().get(event.getEntity());
+        if (d != null) d.lastDeathMs = System.currentTimeMillis();
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
