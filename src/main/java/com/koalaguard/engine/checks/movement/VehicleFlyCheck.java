@@ -80,9 +80,24 @@ public final class VehicleFlyCheck extends SimCheck {
             clean(ctx, 1.0);
             return;
         }
-        Material below = v.getLocation().clone().subtract(0, 0.2, 0).getBlock().getType();
-        if (below == Material.WATER || below == Material.BUBBLE_COLUMN
-                || below == Material.LAVA) {
+        // Probe THREE Y offsets below the vehicle (0.05 / 0.30 / 0.70) so a
+        // boat exiting water — half-on, half-off where the immediate-below
+        // block flickers between water and sand for 2-3 ticks — doesn't
+        // false-flag on the buoyancy rebound. If ANY of the probes returns
+        // water/bubble/lava, treat as water-state and reset the climb
+        // accumulator.
+        org.bukkit.Location vl = v.getLocation();
+        boolean nearLiquid = false;
+        for (double offY : new double[]{ 0.05, 0.30, 0.70 }) {
+            Material m = vl.clone().subtract(0, offY, 0).getBlock().getType();
+            if (m == Material.WATER || m == Material.BUBBLE_COLUMN
+                    || m == Material.LAVA || m == Material.KELP || m == Material.KELP_PLANT
+                    || m == Material.SEAGRASS || m == Material.TALL_SEAGRASS) {
+                nearLiquid = true;
+                break;
+            }
+        }
+        if (nearLiquid) {
             s.lastY = Double.NaN; s.accUp = 0; s.upTicks = 0;
             return;
         }

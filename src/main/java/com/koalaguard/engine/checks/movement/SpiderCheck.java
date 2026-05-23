@@ -39,7 +39,13 @@ public final class SpiderCheck extends SimCheck {
             return;
         }
 
-        boolean climbing = f.dy > cfgD("min-up", 0.02) && s.airTicks > cfgI("min-air-ticks", 4);
+        // Vanilla jump arc against a corner: at airTicks=5..7 dy can still be
+        // ~0.08-0.12 (apex not yet reached for a sprint-jump). The old
+        // min-up=0.02 caught the entire upward half of every corner jump.
+        // Require both a higher dy floor AND deeper airTicks so the check only
+        // fires when the player is ALREADY past the natural apex but still
+        // rising — vanilla can't do that.
+        boolean climbing = f.dy > cfgD("min-up", 0.10) && s.airTicks > cfgI("min-air-ticks", 8);
         boolean wall = CollisionEngine.touchingWall(ctx.player.getWorld(), f.x, f.y, f.z);
 
         if (climbing && wall) {

@@ -44,9 +44,13 @@ public final class AirJumpCheck extends SimCheck {
             return;
         }
 
-        double impulse = cfgD("min-jump-impulse", 0.30);
+        // Auto-step impulses (stairs/slabs) can produce dy~0.42 when the
+        // simulator briefly misses simGround, FP'ing with min-streak=1. Lift
+        // the impulse floor close to the actual vanilla jump (~0.42) and the
+        // airTicks threshold so a one-tick simGround miss can't confirm.
+        double impulse = cfgD("min-jump-impulse", 0.40);
         boolean freshJump = f.dy > impulse && prev.dy <= 0.0;
-        boolean airborne  = !f.simGround && s.airTicks > cfgI("min-air-ticks", 4);
+        boolean airborne  = !f.simGround && s.airTicks > cfgI("min-air-ticks", 6);
 
         if (freshJump && airborne) {
             // Vanilla-impossible. A single confirmed mid-air jump is conclusive
@@ -55,7 +59,7 @@ public final class AirJumpCheck extends SimCheck {
             // immediate setback (the setback path is now synchronous, so the
             // player is rubber-banded the same tick).
             diverge(ctx, cfgD("score", 12.0), cfgD("threshold", 9.0),
-                    cfgI("min-streak", 1),
+                    cfgI("min-streak", 2),
                     String.format("air jump dy=%.3f after %d air ticks", f.dy, s.airTicks),
                     true);
         } else {

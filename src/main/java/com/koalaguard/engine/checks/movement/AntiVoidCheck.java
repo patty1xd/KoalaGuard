@@ -42,9 +42,13 @@ public final class AntiVoidCheck extends SimCheck {
         }
 
         double h = ctx.player.isSneaking() ? 1.5 : 1.8;
-        // No support for a long way down (true void / antivoid hover).
+        // No support for a long way down (true void / antivoid hover). Step
+        // at 0.5 blocks instead of 1.0 so a slab/carpet floor 5.5 blocks
+        // below is not skipped (previously stepping 5.0→6.0 jumped over a
+        // 0.5-block-thick floor and concluded "no support" — produced FPs on
+        // top of high towers and slab-edged builds).
         boolean groundBelow = false;
-        for (double d = 0.0; d <= 6.0 && !groundBelow; d += 1.0) {
+        for (double d = 0.0; d <= 6.0 && !groundBelow; d += 0.5) {
             groundBelow = CollisionEngine.supported(ctx.player.getWorld(), f.x, f.y - d, f.z, h);
         }
         if (groundBelow) { clean(ctx, 1.0); return; }

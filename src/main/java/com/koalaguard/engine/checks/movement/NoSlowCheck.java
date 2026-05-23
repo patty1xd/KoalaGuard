@@ -33,8 +33,14 @@ public final class NoSlowCheck extends SimCheck {
     public void onTick(CheckContext ctx) {
         PositionFrame f = ctx.state.current;
         if (f == null) return;
+        // Full env exemptions (added exWeb/exClimbing/exSlowFalling/exDead/
+        // exSpectator/exLevitation — the use-item branch was running through
+        // scaffolding/ladder/cobweb/slow-falling and false-flagging).
         if (ctx.unstable() || ctx.state.exVehicle || ctx.state.exFlying
-                || ctx.state.exGliding || ctx.state.exRiptide || ctx.state.exLiquid) {
+                || ctx.state.exGliding || ctx.state.exRiptide || ctx.state.exLiquid
+                || ctx.state.exClimbing || ctx.state.exSlowFalling
+                || ctx.state.exLevitation || ctx.state.exDead || ctx.state.exSpectator
+                || ctx.state.exWeb) {
             clean(ctx, 1.0);
             return;
         }
@@ -46,12 +52,15 @@ public final class NoSlowCheck extends SimCheck {
 
         World w = ctx.player.getWorld();
         int bx = (int) Math.floor(f.x), bz = (int) Math.floor(f.z);
-        Material feet = w.getBlockAt(bx, (int) Math.floor(f.y + 0.1), bz).getType();
-        Material legs = w.getBlockAt(bx, (int) Math.floor(f.y + 1.0), bz).getType();
+        // Sample three Y layers around the player so a player STANDING ON top
+        // of a cobweb (feet at integer y, web at y-1) is still detected. The
+        // previous floor(y+0.1) feet probe missed that case entirely.
+        Material feet  = w.getBlockAt(bx, (int) Math.floor(f.y + 0.1), bz).getType();
+        Material legs  = w.getBlockAt(bx, (int) Math.floor(f.y + 1.0), bz).getType();
         Material below = w.getBlockAt(bx, (int) Math.floor(f.y - 0.1), bz).getType();
         double h = f.horizontalSpeed();
 
-        if (feet == Material.COBWEB || legs == Material.COBWEB) {
+        if (feet == Material.COBWEB || legs == Material.COBWEB || below == Material.COBWEB) {
             double max = cfgD("max-web-speed", 0.12);   // legit web ≈ 0.05
             if (h > max) {
                 diverge(ctx, (h - max) * cfgD("score-scale", 50.0),
@@ -74,32 +83,42 @@ public final class NoSlowCheck extends SimCheck {
         }
 
         // ── Use-item NoSlow (eat/drink/bow/crossbow/shield/spyglass).
-        //    Vanilla forces ~0.04 b/t (≥70% slowdown) while a continuous-use
-        //    item is being used. A NoSlow cheat keeps the player at sprint /
-        //    walk speed. The old item-use detection FP'd on walking-while-
-        //    eating (which is slow anyway); this gate is high enough that ONLY
-        //    sustained near-sprint speed mid-use trips it — humans cannot do
-        //    that in vanilla. Catches NoSlowdown / EatHack / BowSpeed across
-        //    Wurst, LiquidBounce, Meteor, Sigma.
+        //    Vanilla clamps movement to ~0.0625 b/t × user-input multiplier
+        //    while a continuous-use item is being used. Top vanilla speed while
+        //    using = sneak-walk (~0.066) or sprint-clamped (~0.165 b/t the
+        //    first tick, ~0.07 sustained). The check fires only when measured
+        //    horizontal speed is OBVIOUSLY above the vanilla use-clamp — and
+        //    the threshold was previously 0.15 which is BELOW vanilla walking
+        //    speed (~0.215). That misconfiguration was the user's reported
+        //    "alerts on anything". Raised to a value above normal walk and
+        //    just below sprint to leave human noise plenty of room.
         //
-        //    USE-ONSET GRACE: when USE_ITEM is first sent the client doesn't
-        //    immediately clamp velocity — there's a 1-3 tick window where the
-        //    player is still finishing their previous sprint frame. Without a
-        //    grace the check false-alerts on EVERY legit eat-while-sprinting
-        //    that the user pointed out. Wait until the use-session has been
-        //    open for at least `use-grace-ms` before checking.
+        //    STALE-FLAG TIMEOUT: `usingItem` is set on USE_ITEM and cleared on
+        //    RELEASE_USE_ITEM, but the client doesn't always send the release
+        //    (instant-use items, lost packets) — the flag latched forever and
+        //    the branch FP'd on everything the player ever did. Hard timeout
+        //    on session age past `use-max-session-ms` clears the gate; any
+        //    real session re-stamps usingItemSinceNanos on the next USE_ITEM.
         boolean usingContinuous = ctx.state.usingItem
                 && (isContinuousUse(ctx.state.inv.mainHand)
                  || isContinuousUse(ctx.state.inv.offHand));
         if (usingContinuous) {
-            long useGraceMs = cfgL("use-grace-ms", 350L);
+            long useGraceMs   = cfgL("use-grace-ms", 350L);
+            long useMaxSessMs = cfgL("use-max-session-ms", 8000L);
             long useAgeMs = (System.nanoTime() - ctx.state.usingItemSinceNanos) / 1_000_000L;
             if (useAgeMs < useGraceMs) {
                 // Just started using — let the vanilla velocity clamp catch up
                 // before we judge. No clean/dirty either way; neutral tick.
                 return;
             }
-            double cap = cfgD("max-use-speed", 0.15);
+            if (useAgeMs > useMaxSessMs) {
+                // Session age implausibly old → almost certainly a missed
+                // RELEASE_USE_ITEM. Treat as not-using and bleed score so the
+                // check stops re-firing every tick on the stale latched flag.
+                clean(ctx, 1.0);
+                return;
+            }
+            double cap = cfgD("max-use-speed", 0.24);   // > vanilla walk (~0.215)
             if (h > cap) {
                 diverge(ctx, (h - cap) * cfgD("use-score-scale", 30.0),
                         cfgD("threshold", 9.0), cfgI("use-min-streak", 6),

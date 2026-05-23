@@ -60,14 +60,18 @@ public final class NoFallCheck extends SimCheck {
         } else if (acc > cfgD("min-fall", 3.2)
                 && f.dy > cfgD("teleport-up-dy", 0.50)
                 && !ctx.state.exGliding
-                && ctx.state.tick - ctx.state.combat.knockbackTick > 6) {
+                && ctx.state.tick - ctx.state.combat.knockbackTick > 6
+                && !nearBounceBlock(ctx)) {
             // ─── TeleportNoFall ───
             // After a damaging fall has been accumulated, a frame whose dy is
             // strongly POSITIVE (>0.5 — well past a vanilla jump that would
             // need a ground impulse) is a TELEPORT during the fall — the
             // cheat snaps the player up to "reset" the server's fallDistance.
             // Excluded: legit knockback (lastVelocityMs grace is up the stack
-            // via ctx.unstable(); plus we double-gate on knockbackTick).
+            // via ctx.unstable(); plus we double-gate on knockbackTick). Also
+            // excluded: SLIME/BED/HONEY bounce — a 5-block fall onto a slime
+            // produces exactly acc>3.2 and dy=+0.7 from the bounce, the
+            // signature this rule originally false-flagged on.
             diverge(ctx, cfgD("teleport-score", 8.0), cfgD("threshold", 12.0),
                     cfgI("teleport-min-streak", 1),
                     String.format("TeleportNoFall: dy=%.2f after %.1f-block fall",
@@ -77,6 +81,22 @@ public final class NoFallCheck extends SimCheck {
             if (supported) { acc = 0; clean(ctx, 2.0); }
         }
         fall.put(id, acc);
+    }
+
+    /** True if a slime/bed/honey block is within ~2 blocks under the player. */
+    private static boolean nearBounceBlock(CheckContext ctx) {
+        PositionFrame f = ctx.state.current;
+        if (f == null) return false;
+        var w = ctx.player.getWorld();
+        int bx = (int) Math.floor(f.x), bz = (int) Math.floor(f.z);
+        int by = (int) Math.floor(f.y);
+        for (int dy = 0; dy <= 2; dy++) {
+            var m = w.getBlockAt(bx, by - dy, bz).getType();
+            if (m == org.bukkit.Material.SLIME_BLOCK
+                    || m == org.bukkit.Material.HONEY_BLOCK
+                    || m.name().endsWith("_BED")) return true;
+        }
+        return false;
     }
 
     @Override

@@ -29,8 +29,18 @@ public final class JesusCheck extends SimCheck {
         if (f == null) return;
         if (ctx.unstable() || ctx.state.exVehicle || ctx.state.exFlying
                 || ctx.state.exGliding || ctx.state.exLiquid || ctx.state.exLevitation
-                || ctx.state.exRiptide || f.simGround) {
+                || ctx.state.exRiptide || ctx.state.exSlowFalling || f.simGround) {
             clean(ctx, 1.0);
+            return;
+        }
+        // Knockback / damage / teleport grace — PvP knockback can skim a player
+        // across a pond surface for several frames at dy≈0 / h>0.08, which is
+        // exactly the Jesus signature. Without this grace the check FP'd on
+        // any near-water PvP encounter.
+        long now = System.currentTimeMillis();
+        if (now - ctx.data.lastVelocityMs < 1200
+                || now - ctx.data.lastDamageMs < 1000
+                || now - ctx.data.lastTeleportMs < 1500) {
             return;
         }
         World w = ctx.player.getWorld();

@@ -38,8 +38,12 @@ public final class ClipCheck extends SimCheck {
         if (seen.getOrDefault(id, -1L) == seq) return;
         seen.put(id, seq);
 
+        // Streak of 2 (was 1) — a single chunk-load race in the upstream
+        // ray-tester would otherwise insta-rubber-band a legit player. The
+        // confirmation still fires inside ~100 ms of the second clip event so
+        // real cheats are still caught fast.
         diverge(ctx, cfgD("score", 15.0), cfgD("threshold", 9.0),
-                cfgI("min-streak", 1),
+                cfgI("min-streak", 2),
                 "clip: " + ctx.data.clipDetail, true);   // setback = rubber-band
     }
 

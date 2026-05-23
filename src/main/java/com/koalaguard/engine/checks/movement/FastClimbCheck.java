@@ -31,7 +31,16 @@ public final class FastClimbCheck extends SimCheck {
             return;
         }
         long now = System.currentTimeMillis();
-        if (now - ctx.data.lastVelocityMs < 1200 || now - ctx.data.lastDamageMs < 800) return;
+        // Added teleport / bubble-column / slime-bounce grace. The previous
+        // version only graced kb and damage; a /tp landing on a ladder
+        // mid-fall, or a bubble-column eject onto a ladder, or a slime
+        // bounce that finished on a ladder all carry forward >0.40 dy for
+        // a frame or two and false-flagged climb-down.
+        if (now - ctx.data.lastVelocityMs < 1200 || now - ctx.data.lastDamageMs < 800
+                || now - ctx.data.lastTeleportMs < 1500
+                || now - ctx.data.bubbleColumnMs < 1500
+                || now - ctx.data.slimeBounceMs < 1500
+                || now - ctx.data.lastSlimeOrBedMs < 1500) return;
 
         double maxUp   = cfgD("max-up", 0.24);
         double maxDown = cfgD("max-down", 0.40);
