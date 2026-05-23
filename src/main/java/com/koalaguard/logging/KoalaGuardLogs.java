@@ -26,13 +26,33 @@ public final class KoalaGuardLogs {
 
     public void alert(Alert a) {
         write(String.format("[ALERT] %s failed %s (%s) vl=%d/%d ping=%dms tps=%.2f world=%s loc=%s brand=%s | %s",
-                a.player(), a.check(), a.category(), a.vl(), a.maxVl(), a.ping(), a.tps(),
-                a.world(), a.coords(), a.brand(), a.detail()));
+                safe(a.player()), safe(a.check()), safe(a.category()),
+                a.vl(), a.maxVl(), a.ping(), a.tps(),
+                safe(a.world()), safe(a.coords()), safe(a.brand()), safe(a.detail())));
     }
 
     public void punishment(Alert a) {
         write(String.format("[PUNISH] %s -> %s for %s vl=%d ping=%dms tps=%.2f",
-                a.player(), a.punishmentType(), a.check(), a.vl(), a.ping(), a.tps()));
+                safe(a.player()), safe(a.punishmentType()), safe(a.check()),
+                a.vl(), a.ping(), a.tps()));
+    }
+
+    /**
+     * Strip CR/LF/control characters from attacker-controlled fields before
+     * concatenation. Otherwise a malicious client brand of
+     * "vanilla\n[ALERT] OtherPlayer failed ban-evasion" forges log lines
+     * that fool SIEM / log review (CWE-117 / CWE-93).
+     */
+    private static String safe(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\r' || c == '\n' || c == '\t') { b.append(' '); continue; }
+            if (c < 0x20 || c == 0x7F) continue;
+            b.append(c);
+        }
+        return b.toString();
     }
 
     private void write(String line) {
