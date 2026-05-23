@@ -101,6 +101,13 @@ checks:
     score: 6.0
     threshold: 12.0
     min-streak: 2
+    # TeleportNoFall variant — after a damaging fall has accumulated, a frame
+    # whose dy is strongly POSITIVE (>0.50) is a teleport during the fall
+    # (cheat snaps up to reset server fallDistance). Knockback-tick gated so
+    # legit knockback-up isn't flagged.
+    teleport-up-dy: 0.50
+    teleport-score: 8.0
+    teleport-min-streak: 1
 
   timer:
     enabled: true
@@ -112,11 +119,14 @@ checks:
     score-scale: 40.0
     threshold: 10.0
     min-streak: 2
-    # Slow-timer variant (the client deliberately runs slow; lets the player
-    # "skip" damage/animation windows without a burst-release fingerprint).
-    detect-slow-timer: true
-    max-slow-ratio: 0.20
-    slow-score-scale: 40.0
+    # CRITICAL: only evaluate the ratio when there are enough MOVEMENT frames
+    # in the window. s.tick (movement-tick counter) FREEZES while the player
+    # is stationary (rotation-only packets create no PositionFrame), so a
+    # ratio-based comparison gives 0 for any standing-still player. The old
+    # slow-timer logic falsely flagged this — which is why "Timer alerts for
+    # literally anything, even standing still." Slow-timer detection is now
+    # entirely off; it can't be done correctly with this metric.
+    min-move-frames: 30
 
   fastclimb:
     enabled: true
@@ -169,9 +179,14 @@ checks:
     # / using spyglass / drinking). Threshold set sprint-magnitude so legit
     # walking-while-eating (~0.04 b/t) never trips; the cheat lets the
     # player keep near-sprint speed (~0.281 b/t) instead.
+    # USE-ONSET GRACE: vanilla doesn't immediately clamp velocity when
+    # USE_ITEM starts — there's a 1-3 tick window where the player carries
+    # over their previous sprint frame. Without this grace, the check
+    # false-alerts on every legit eat-while-sprinting onset.
     max-use-speed: 0.15
     use-score-scale: 30.0
     use-min-streak: 6
+    use-grace-ms: 350
 
   # ── COMBAT (reconstructed-position raytrace + aim) ──
   # Lag-compensated: takes the SMALLEST eye→hitbox distance over the victim's
@@ -194,6 +209,9 @@ checks:
   # Lag-compensated: victim hitbox rewound to the attack instant, so the
   # angular gate is tight (5°) and catches a small hitbox-expander. The wider
   # fallback slack only applies when no rewound box is available.
+  # FakeSwing — ≥2 SWING_HAND packets per single attack within the window
+  # (vanilla = 1:1). Some cheats add decoy swings to mimic legit combat
+  # animation while the actual attack chain is synthetic.
   hitvalidation:
     enabled: true
     max-violations: 10
@@ -204,6 +222,8 @@ checks:
     angle-score-scale: 0.6
     noswing-score: 5.0
     swing-window-ticks: 4
+    fake-swing-excess: 2
+    fakeswing-score: 4.0
     threshold: 9.0
     min-streak: 4
 
@@ -265,6 +285,12 @@ checks:
     # ≥14 CPS over 30 clicks). Catches butterfly emulation and triggerbot too.
     inhuman-mean-ms: 72.0
     inhuman-min-samples: 28
+    # Absolute physical ceiling — mean < 25 ms (~40 CPS) over 12+ samples is
+    # anatomically impossible. Pro drag-clickers max ~32 CPS in 1-s bursts;
+    # 40+ CPS sustained is packet injection. Smaller sample threshold because
+    # no FP risk; flags on a single sustained burst.
+    absolute-impossible-ms: 25.0
+    absolute-min-samples: 12
 
   # ── WORLD ──
   nuker:
@@ -446,21 +472,26 @@ checks:
   # cadence only CORROBORATES an aim-off/backward place (rhythmic = human).
   # Scaffold — Bridge (S0 aim-off + S1 backward-walk + S2 cadence) PLUS the
   # Tower variant (vertical-only movement + place below feet + recent jump
-  # impulse). Tower's rotation-spoof bypass on aim-off is caught by tower-*
-  # keys because the geometry of "rising while placing under feet" is itself
-  # the signature, independent of where the cheat claims to be looking.
-  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 65.0, max-reach: 5.5, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, tower-max-horizontal: 0.10, tower-jump-scan: 8, tower-min-jump: 0.30, tower-score: 4.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
-  # AutoWeb — automatic cobweb placement in combat. Two distinct geometric
-  # signatures:
+  # impulse) PLUS the Grim lastRot bypass (rotation bit-exact identical
+  # across 3+ consecutive places — vanilla micro-jitter always perturbs the
+  # rotation between actions, so literal float-equality is the fingerprint).
+  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 65.0, max-reach: 5.5, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, tower-max-horizontal: 0.10, tower-jump-scan: 8, tower-min-jump: 0.30, tower-score: 4.0, lastrot-streak: 3, lastrot-score: 6.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
+  # AutoWeb — automatic cobweb placement in combat. Data source is the
+  # SERVER-AUTHORITATIVE block-place ring (BlockPlaceEvent at MONITOR), NOT
+  # the per-tick inventory mirror — a swap-in / place / swap-back cheat
+  # clears the mirror before our check runs, which was why the user reported
+  # "enemy using autoweb on me and no alerts". The event always fires for
+  # the actual placed material, regardless of the cheat's hand-swap timing.
+  #
+  # Signatures:
   #   S0 self-web without looking down — cobweb placed at attacker's own
   #      position while pitch < self-min-look-down-pitch (legit self-web
   #      requires looking down at feet; the cheat keeps the camera level
   #      to keep fighting).
   #   S1 opponent-web — cobweb placed AT (or right against) an enemy's
-  #      hitbox (rewound via TargetTracker when available, so desync can't
-  #      hide the proximity).
+  #      rewound hitbox.
   # post-attack and machine-cadence only CORROBORATE — never standalone.
-  autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, attack-window-ticks: 4, combat-radius: 5.0, self-radius: 1.6, enemy-radius: 1.6, self-min-look-down-pitch: 55.0, self-web-score: 7.0, opponent-web-score: 7.0, max-angle: 55.0, aim-score: 5.0, combat-score: 5.0, sample-cap: 20, min-samples: 6, max-sd-interval: 0.9, cadence-score: 6.0, threshold: 10.0, min-streak: 3 }
+  autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, combat-radius: 5.0, self-radius: 1.6, enemy-radius: 1.6, self-min-look-down-pitch: 55.0, self-web-score: 7.0, opponent-web-score: 7.0, combat-score: 5.0, post-attack-window-ns: 400000000, sample-cap: 20, min-samples: 6, max-sd-interval-ms: 35.0, cadence-score: 6.0, threshold: 10.0, min-streak: 2 }
 
   # ── NEW (2026-05-22) ──
   # VehicleFly / BoatFly — every other movement check exempts `exVehicle`, so
@@ -496,9 +527,10 @@ checks:
     min-streak: 3
 
   # AirPlace — block placed against an air "clicked face" (forged BLOCK_PLACE
-  # packet). 250ms grace covers the MC-279849 same-tick break-then-replace
-  # race so legit play never trips. Streak required so a single chunk-reload
-  # race tick is ignored.
+  # packet). Only flags when the clicked block is ACTUAL air; cobweb / water
+  # / lava / grass / snow / lily / replaceables are valid clicked faces in
+  # vanilla (placing water on cobweb is legit — was a false positive). 250ms
+  # grace covers the MC-279849 same-tick break-then-replace race.
   airplace:
     enabled: true
     max-violations: 10
@@ -508,3 +540,79 @@ checks:
     score: 5.0
     threshold: 9.0
     min-streak: 2
+
+  # AntiKnockback-Sprint — vanilla cancels sprint on damage (auto-sends
+  # STOP_SPRINTING). Cheats suppress that packet to keep the ~30% movement
+  # advantage. After damage, if the player is still sprinting AND moving at
+  # sprint speed past the window with no STOP_SPRINTING in the log → flag.
+  antikbsprint:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    post-damage-window-ticks: 3
+    min-sprint-speed: 0.20
+    score: 6.0
+    threshold: 9.0
+    min-streak: 2
+
+  # BowAimbot / TridentAimbot — projectile aurabot. Requires BOTH a snap-on-
+  # release rotation jump (last-tick yaw delta ≫ draw-time mean) AND an
+  # inhuman release-angle consistency to nearest enemy across many shots.
+  # Human bow flicks have drift around release; bots snap then immediately
+  # release.
+  bowaimbot:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: permanent
+    min-draw-ms: 80
+    max-draw-ms: 10000
+    snap-min-deg: 18.0
+    snap-vs-mean-ratio: 4.0
+    sample-cap: 12
+    min-samples: 5
+    max-mean-deg: 4.0
+    max-sd-deg: 2.5
+    min-snap-hits: 3
+    score: 7.0
+    threshold: 9.0
+    min-streak: 2
+
+  # SprintHunger — vanilla rule: cannot start sprinting when food < 6.
+  # Server-authoritative food level; cheat cannot spoof. Requires both
+  # sprinting state AND actual sprint-magnitude movement so a momentum
+  # carry-over doesn't FP.
+  sprinthunger:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    min-food-to-sprint: 6
+    min-sprint-speed: 0.20
+    score: 6.0
+    threshold: 9.0
+    min-streak: 4
+
+  # MacroCheck — tick-locked input macros (W-tap sprint-toggle / jump-reset).
+  # Tracks the gap between consecutive START_SPRINTING ENTITY_ACTIONs and
+  # between consecutive jump impulses. A human's gap has 8-15 ms intrinsic
+  # jitter every attempt; a macro snaps to the server tick with ±0-1 ms
+  # variance over 14+ attempts. Combat-gated so non-combat sprint+jump
+  # navigation isn't evaluated.
+  macro:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    combat-window-ns: 1500000000
+    sample-cap: 24
+    min-samples: 14
+    max-sd-ms: 4.0
+    max-sprint-mean-ms: 250.0
+    max-jump-mean-ms: 800.0
+    min-jump-impulse: 0.30
+    sprint-score: 7.0
+    jump-score: 7.0
+    threshold: 9.0
+    min-streak: 3
