@@ -50,6 +50,9 @@ public final class PlayerData {
     /** A known cheat-client plugin channel was registered/used (Layer 1). */
     public volatile boolean flagBadChannel;
     public volatile String badChannel = "";
+    /** Brand string is literally "vanilla" — used in combination with mod-
+     *  loader channel registration to detect cheats that lie about brand. */
+    public volatile boolean brandVanilla;
 
     /** Clip / phase-teleport (.vclip/.hclip): moved through solid with no
      *  server teleport. Stamped by the engine, consumed by ClipCheck. */
@@ -68,6 +71,10 @@ public final class PlayerData {
     // ───────────────── grace windows (set by BukkitStateListener) ─────────────────
     public volatile long joinMs, lastTeleportMs, lastVelocityMs, lastDamageMs, lastRespawnMs;
     public volatile long gamemodeChangeMs, lastWorldChangeMs, lastRiptideMs;
+    /** Wall-clock of the most recent death event — paired with lastRespawnMs
+     *  for AutoRespawn detection (sub-100ms gap = bot reflex). */
+    public volatile long lastDeathMs;
+    public volatile long lastRespawnGapMs = -1;        // delta the last time we measured
     public volatile long slimeBounceMs, bubbleColumnMs, elytraMs, lastSlimeOrBedMs;
     public volatile Vector pendingVelocity;
     public volatile long pendingVelocityMs;
