@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class AntiKBSprintCheck extends SimCheck {
 
     private static final class S {
-        long lastEvaluatedDamageTick = Long.MIN_VALUE;
+        long lastEvaluatedDamageNanos = Long.MIN_VALUE;
     }
 
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
@@ -54,14 +54,20 @@ public final class AntiKBSprintCheck extends SimCheck {
 
         long lastDamageTick = ctx.state.combat.lastDamageTakenTick;
         if (lastDamageTick < 0) return;
-        if (lastDamageTick == s.lastEvaluatedDamageTick) return;
+        // Dedupe by NANOS not tick — tick freezes when the player isn't moving
+        // (rotation-only frames don't advance s.tick), so multi-hit damage
+        // within a frozen-tick window collapsed onto the same tick number and
+        // only the first event ever evaluated. lastDamageTakenNanos is always
+        // unique.
+        long lastDamageNanos = ctx.state.combat.lastDamageTakenNanos;
+        if (lastDamageNanos == s.lastEvaluatedDamageNanos) return;
 
         int win = cfgI("post-damage-window-ticks", 3);
         long sinceTick = ctx.state.tick - lastDamageTick;
         // Wait for the window after damage before deciding.
         if (sinceTick < win) return;
 
-        s.lastEvaluatedDamageTick = lastDamageTick;
+        s.lastEvaluatedDamageNanos = lastDamageNanos;
 
         // Within the window, did the client send STOP_SPRINTING? Scan recent
         // ENTITY_ACTION packets bound to ticks in [lastDamageTick, +win].

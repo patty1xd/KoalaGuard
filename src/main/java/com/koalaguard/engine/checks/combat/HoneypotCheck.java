@@ -92,11 +92,15 @@ public final class HoneypotCheck extends SimCheck {
                     if (ang < cfgD("max-aim-deg", 50.0)) continue;   // could be legit
                 }
 
-                diverge(ctx, cfgD("score", 20.0), cfgD("threshold", 9.0),
-                        cfgI("min-streak", 1),
+                // Only arm the combat cancel when diverge() actually confirmed
+                // (cooldown / streak gates could have suppressed it). Was
+                // running unconditionally → silent combat cancel even without
+                // a fresh confirmation.
+                boolean fired = diverge(ctx, cfgD("score", 20.0),
+                        cfgD("threshold", 9.0), cfgI("min-streak", 1),
                         "attacked unrenderable honeypot " + (hitGhost ? "ghost-player" : "entity")
                                 + " while looking away (id " + p.intA + ")", false);
-                armCombatCancel(ctx);
+                if (fired) armCombatCancel(ctx);
                 despawn(player, h);
                 h.nextSpawnMs = now + cfgL("cooldown-ms", 12_000L);
                 return;

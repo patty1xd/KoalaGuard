@@ -53,10 +53,16 @@ public final class ShieldBypassCheck extends SimCheck {
         super(plugin, "shieldbypass", CheckCategory.COMBAT, "Automated shield-disable swap");
     }
 
-    /** Any packet that swaps the active weapon item. */
+    /**
+     * Any packet that swaps the active weapon item. Note: HELD_ITEM
+     * (hotbar number-key) and SWAP_ITEM_WITH_OFFHAND (F) are unambiguous —
+     * a player pressed a swap key. CLICK_WINDOW was previously included but
+     * matched EVERY inventory click — mid-fight inventory use (armor swap,
+     * hotbar drag) produced spurious swap events that paired with attacks
+     * into a fake "machine cadence" pattern. Restrict to hotbar swaps only.
+     */
     private static boolean weaponSwap(CapturedPacket p) {
         return p.kind == PacketKind.HELD_ITEM
-            || p.kind == PacketKind.CLICK_WINDOW
             || (p.kind == PacketKind.DIGGING
                 && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA));
     }

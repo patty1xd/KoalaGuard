@@ -114,14 +114,22 @@ public final class BowAimbotCheck extends SimCheck {
                 }
             }
 
-            // S1 — angle to nearest enemy at release.
+            // S1 — angle to nearest PLAYER enemy at release. The old loop
+            // iterated EVERY LivingEntity including pets/villagers/chickens
+            // at the shooter's feet, which sank bestAng to ~0 regardless of
+            // intent and FP'd anyone fighting in a populated area. Bows in
+            // PvP target players; restrict the sample set to players in a
+            // different scoreboard team / non-pet relationship.
             Player attacker = ctx.player;
             org.bukkit.Location l = attacker.getEyeLocation();
             double bestAng = Double.MAX_VALUE;
             for (org.bukkit.entity.Entity e :
                     attacker.getWorld().getNearbyEntities(l, 60, 60, 60)) {
-                if (!(e instanceof LivingEntity)) continue;
+                if (!(e instanceof Player)) continue;            // PvP only
                 if (e == attacker) continue;
+                Player pl = (Player) e;
+                if (pl.getGameMode() == org.bukkit.GameMode.SPECTATOR
+                        || pl.getGameMode() == org.bukkit.GameMode.CREATIVE) continue;
                 double cx = e.getBoundingBox().getCenterX();
                 double cy = e.getBoundingBox().getCenterY();
                 double cz = e.getBoundingBox().getCenterZ();

@@ -90,18 +90,23 @@ public final class VelocityCheck extends SimCheck {
         double minFrac = cfgD("min-fraction", 0.33);
 
         // Reversal: signed projection went strongly NEGATIVE — the player
-        // moved AGAINST the knockback direction. No legit mechanic does this
-        // for a meaningful magnitude; counter-strafe still nets positive
-        // along-direction motion from the kb impulse.
-        if (k.maxAgainst > cfgD("max-against", 0.18) && k.expectedH > 0.18) {
+        // moved AGAINST the knockback direction. Counter-sprint W-tap PvP nets
+        // small against-kb motion once friction overtakes the impulse, so
+        // raised the magnitude floor AND require a substantial kb (>0.35)
+        // before flagging — small kb produces small fractions either way.
+        if (k.maxAgainst > cfgD("max-against", 0.35) && k.expectedH > 0.35) {
             diverge(ctx, cfgD("reversal-score", 8.0),
-                    cfgD("threshold", 9.0), cfgI("min-streak", 2),
+                    cfgD("threshold", 9.0), cfgI("min-streak", 3),
                     String.format("kb reversal: moved %.3f against kb dir (exp=%.3f)",
                             k.maxAgainst, k.expectedH), false);
             return;
         }
 
-        if (frac < minFrac) {
+        // Fraction-absorbed gate: gate on a minimum expectedH so tiny kb
+        // (sub-significance) doesn't spuriously produce fractions that look
+        // small in absolute terms but are noise.
+        double minExpected = cfgD("min-expected-h", 0.22);
+        if (k.expectedH >= minExpected && frac < minFrac) {
             diverge(ctx, (minFrac - frac) * cfgD("score-scale", 22.0),
                     cfgD("threshold", 9.0), cfgI("min-streak", 3),
                     String.format("absorbed %.0f%% of simulated knockback (along=%.3f exp=%.3f)",

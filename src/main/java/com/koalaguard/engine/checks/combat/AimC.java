@@ -41,6 +41,15 @@ public final class AimC extends SimCheck {
                     && String.valueOf(p.objA).contains("ATTACK")) { newest = p.recvNanos; break; }
         }
         if (newest < 0) { clean(ctx, 0.5); return; }
+        // Dedupe so the SAME attack window is scored only once. Previously
+        // every tick re-evaluated the same 160-packet window and re-added
+        // score, snowballing the violation on a single legit AoE cleanup of
+        // 3 mobs. Key off the newest attack nanos: only re-evaluate when
+        // newer attacks arrived.
+        java.util.UUID id = ctx.data.getUuid();
+        Long prevNewest = lastScoredNanos.get(id);
+        if (prevNewest != null && prevNewest == newest) { clean(ctx, 0.5); return; }
+        lastScoredNanos.put(id, newest);
 
         Set<Integer> targets = new HashSet<>();
         for (CapturedPacket p : recent) {
@@ -61,5 +70,14 @@ public final class AimC extends SimCheck {
         } else {
             clean(ctx, 1.0);
         }
+    }
+
+    private final java.util.Map<java.util.UUID, Long> lastScoredNanos
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public void cleanup(java.util.UUID uuid) {
+        super.cleanup(uuid);
+        lastScoredNanos.remove(uuid);
     }
 }

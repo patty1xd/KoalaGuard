@@ -123,8 +123,12 @@ public final class MacroCheck extends SimCheck {
         double bad = 0;
         StringBuilder why = new StringBuilder();
 
-        int minSamples = cfgI("min-samples", 14);
-        double maxSdMs = cfgD("max-sd-ms", 4.0);
+        // Raised sd<4ms to sd<1.5ms — skilled W-tappers locked to click cadence
+        // can produce sd=2-3 ms over a short window; sub-2 ms variance over a
+        // long sample is the actual macro signature. Sample floor raised to
+        // 24 so a transient skilled burst can't confirm.
+        int minSamples = cfgI("min-samples", 24);
+        double maxSdMs = cfgD("max-sd-ms", 1.5);
 
         if (s.sprintIntervalsMs.size() >= minSamples) {
             double sd = MathUtil.standardDeviation(s.sprintIntervalsMs);

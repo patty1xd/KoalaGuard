@@ -55,18 +55,16 @@ public final class RotationCheck extends SimCheck {
             return;
         }
 
-        // 1c) Yaw leap > 180° in a single rotation packet — physically the
-        //     widest distinguishable mouse turn is ≤180° (the wrap point);
-        //     anything bigger is an unwrapped value that the cheat forgot to
-        //     normalise. Single sample, large margin; legit shouldn't trip.
-        java.util.List<Float> signed = ctx.state.signedYawDeltas(8);
-        for (float d : signed) {
-            if (Math.abs(d) > cfgD("max-yaw-leap-deg", 180.0)) {
-                diverge(ctx, cfgD("invalid-pitch-score", 8.0),
-                        cfgD("threshold", 14.0), cfgI("min-streak", 1),
-                        String.format("yaw leap %.1f° in one packet", d), false);
-                return;
-            }
+        // 1c) Out-of-range yaw — vanilla wraps to (-180, 180]. A cheat that
+        //     forgets to normalise sends e.g. yaw=540°; the server stores the
+        //     raw value. Vanilla clients literally cannot emit |yaw| > 180.
+        //     (Replaces the previous |signedYawDelta|>180 check which was dead
+        //     code: signedYawDeltas() wraps to [-180,180] by construction.)
+        if (Math.abs(yaw) > cfgD("max-yaw-deg", 180.0001)) {
+            diverge(ctx, cfgD("invalid-pitch-score", 8.0),
+                    cfgD("threshold", 14.0), cfgI("min-streak", 1),
+                    String.format("yaw %.1f° out of (-180,180]", yaw), false);
+            return;
         }
 
         // 2) Quantised aim — only while fighting, only on a large sample.

@@ -105,11 +105,15 @@ public final class HitValidationCheck extends SimCheck {
             bad += cfgD("noswing-score", 5.0);
             why.append("no swing in chain ");
         }
-        // FakeSwing — ≥ 2 swings per single attack within the window. Some
-        // cheats add decoy swings to make a packet-only aura look "normal"
-        // but they over-shoot the count. Vanilla swing:attack ≈ 1:1; ≥2:1
-        // is a synthetic chain.
-        if (attacks > 0 && swings >= attacks + cfgI("fake-swing-excess", 2)) {
+        // FakeSwing — many decoy swings per attack within the window. The old
+        // gate "swings >= attacks + 2" FP'd on legit missed clicks (3 swings,
+        // 1 land is normal play). Require BOTH a larger absolute swing count
+        // AND a high ratio so noise can't trip it. Vanilla rarely exceeds 4
+        // swings per actual hit; aura decoy patterns push 6+ per hit.
+        int excess = cfgI("fake-swing-excess", 5);
+        double minRatio = cfgD("fake-swing-min-ratio", 4.0);
+        if (attacks > 0 && swings >= attacks + excess
+                && (double) swings / Math.max(1, attacks) >= minRatio) {
             bad += cfgD("fakeswing-score", 4.0);
             why.append(String.format("fake-swing ratio %d:%d ", swings, attacks));
         }
