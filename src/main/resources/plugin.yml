@@ -14,8 +14,26 @@ permissions:
     description: Exempt from every check
     default: false
   koalaguard.admin:
-    description: Access KoalaGuard admin commands
+    description: Access KoalaGuard admin commands (info, reload, bans, checks)
     default: op
+    children:
+      koalaguard.admin.info: true
+  koalaguard.admin.info:
+    description: View a player's violations + ping + brand
+    default: false
+  koalaguard.admin.unban:
+    description: Remove a ban entry by canonical UUID
+    default: op
+  koalaguard.admin.tp:
+    description: Teleport to a player via /kg tp
+    default: op
+  koalaguard.admin.*:
+    description: All admin sub-permissions (info / unban / tp)
+    default: op
+    children:
+      koalaguard.admin.info: true
+      koalaguard.admin.unban: true
+      koalaguard.admin.tp: true
 
 commands:
   koalaguard:
