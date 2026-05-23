@@ -93,12 +93,21 @@ public final class AutoClickerCheck extends SimCheck {
         boolean inhumanRate = mean < cfgD("inhuman-mean-ms", 72.0)
                 && s.intervals.size() >= cfgI("inhuman-min-samples", 28);
 
-        if ((fast && robotic) || inhumanRate) {
+        // Absolute physical ceiling — > 40 CPS for any meaningful sample is
+        // anatomically impossible for any human finger / drag-click setup.
+        // Even pro drag-clickers max ~32 CPS in 1-second bursts; 25 ms mean
+        // means ~40 CPS sustained, which only a packet-injecting bot achieves.
+        // Single signal — fires with a smaller sample because no FP risk.
+        boolean absoluteImpossible = mean < cfgD("absolute-impossible-ms", 25.0)
+                && s.intervals.size() >= cfgI("absolute-min-samples", 12);
+
+        if ((fast && robotic) || inhumanRate || absoluteImpossible) {
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 10.0),
-                    cfgI("min-streak", 3),
+                    cfgI("min-streak", absoluteImpossible ? 1 : 3),
                     String.format("clicks mean=%.0fms cv=%.3f dup=%d n=%d%s",
                             mean, cv, dupes, s.intervals.size(),
-                            inhumanRate ? " (inhuman rate)" : ""), false);
+                            absoluteImpossible ? " (PHYSICALLY IMPOSSIBLE)"
+                                    : inhumanRate ? " (inhuman rate)" : ""), false);
         } else {
             clean(ctx, 1.0);
         }

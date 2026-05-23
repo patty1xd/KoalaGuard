@@ -79,9 +79,19 @@ public final class HitValidationCheck extends SimCheck {
                 : cfgD("angle-slack-deg", 5.0) + cfgD("fallback-extra-slack-deg", 6.0);
         double maxAngle = Math.toDegrees(Math.atan2(radius, dist)) + slack;
 
-        boolean swung = ctx.state.log.existsSinceTick(
-                atk - cfgI("swing-window-ticks", 4),
-                p -> p.kind == PacketKind.ANIMATION);
+        // Count swings + attacks in the window for the swing-chain analysis.
+        int swingWin = cfgI("swing-window-ticks", 4);
+        int swings = 0, attacks = 0;
+        long atkNanos = ctx.state.combat.lastAttackNanos;
+        long swingWindowNs = swingWin * 50_000_000L;
+        for (var pp : ctx.state.log.recent(96)) {
+            long age = atkNanos - pp.recvNanos;
+            if (age < -swingWindowNs || age > swingWindowNs) continue;
+            if (pp.kind == PacketKind.ANIMATION) swings++;
+            else if (pp.kind == PacketKind.INTERACT_ENTITY
+                    && String.valueOf(pp.objA).contains("ATTACK")) attacks++;
+        }
+        boolean swung = swings > 0;
 
         double bad = 0;
         StringBuilder why = new StringBuilder();
@@ -90,8 +100,18 @@ public final class HitValidationCheck extends SimCheck {
             why.append(String.format("aim %.1f° > %.1f° ", angle, maxAngle));
         }
         if (!swung) {
+            // NoSwing — USE_ENTITY without any matching ANIMATION packet in
+            // the chain. Vanilla: a swing precedes every melee attack.
             bad += cfgD("noswing-score", 5.0);
             why.append("no swing in chain ");
+        }
+        // FakeSwing — ≥ 2 swings per single attack within the window. Some
+        // cheats add decoy swings to make a packet-only aura look "normal"
+        // but they over-shoot the count. Vanilla swing:attack ≈ 1:1; ≥2:1
+        // is a synthetic chain.
+        if (attacks > 0 && swings >= attacks + cfgI("fake-swing-excess", 2)) {
+            bad += cfgD("fakeswing-score", 4.0);
+            why.append(String.format("fake-swing ratio %d:%d ", swings, attacks));
         }
 
         if (bad > 0) {
