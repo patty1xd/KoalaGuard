@@ -41,25 +41,40 @@ public final class TargetTracker {
                     b.getMaxX(), b.getMaxY(), b.getMaxZ() });
             while (q.size() > CAP) q.removeFirst();
         }
-        if (hist.size() > 96) {                 // drop despawned / far entities
-            long cutoff = nanos - STALE_NS;
-            hist.values().removeIf(q -> q.isEmpty() || q.peekLast()[0] < cutoff);
-        }
+        // Aggressive eviction: stale entries forever-old never evicted in the
+        // old "size > 96" path. Run cutoff every snapshot so a victim that
+        // walked out of the 14-block radius doesn't return ancient AABBs to
+        // boxAt() if the entityId is later re-queried.
+        long cutoff = nanos - STALE_NS;
+        hist.values().removeIf(q -> q.isEmpty() || q.peekLast()[0] < cutoff);
     }
 
     /**
-     * The victim's hitbox closest in time to {@code nanos}.
+     * The victim's hitbox at-or-before {@code nanos} — the snapshot whose
+     * timestamp is the largest value ≤ nanos. This is what lag compensation
+     * actually needs: the victim's geometry as the server knew it when the
+     * attack arrived. The previous "closest in absolute time" picked the
+     * AFTER-attack snapshot (EngineTask snapshots at start-of-tick BEFORE
+     * draining intake, so the most-recent snapshot is post-attack), silently
+     * inverting the rewind. Falls back to the oldest snapshot if no
+     * at-or-before exists (entity only just entered tracking).
+     *
      * @return {minX,minY,minZ,maxX,maxY,maxZ} or null if unknown.
      */
     public double[] boxAt(int entityId, long nanos) {
         Deque<double[]> q = hist.get(entityId);
         if (q == null || q.isEmpty()) return null;
         double[] best = null;
-        long bestDiff = Long.MAX_VALUE;
+        long bestStamp = Long.MIN_VALUE;
+        // Iterate oldest→newest; keep the latest snapshot with stamp ≤ nanos.
         for (double[] snap : q) {
-            long diff = Math.abs((long) snap[0] - nanos);
-            if (diff < bestDiff) { bestDiff = diff; best = snap; }
+            long stamp = (long) snap[0];
+            if (stamp <= nanos && stamp > bestStamp) {
+                bestStamp = stamp;
+                best = snap;
+            }
         }
+        if (best == null) best = q.peekFirst();   // entity newer than the attack
         if (best == null) return null;
         return new double[]{ best[1], best[2], best[3], best[4], best[5], best[6] };
     }

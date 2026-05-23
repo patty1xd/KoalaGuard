@@ -25,6 +25,8 @@ public final class CombatState {
     public boolean knockbackConsumed;
 
     public long lastDamageTakenTick = -1;
+    /** Wall-clock nanos of last damage taken (multi-hit dedupe; tick freezes). */
+    public volatile long lastDamageTakenNanos = Long.MIN_VALUE / 2;
     /** Wall-clock of the last entity attack (GUI-impossible-while-attacking). */
     public volatile long lastAttackNanos = Long.MIN_VALUE / 2;
 
