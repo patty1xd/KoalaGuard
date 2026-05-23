@@ -5,6 +5,8 @@ import com.koalaguard.engine.check.SimCheck;
 import com.koalaguard.engine.checks.combat.AimA;
 import com.koalaguard.engine.checks.combat.AimB;
 import com.koalaguard.engine.checks.combat.AimC;
+import com.koalaguard.engine.checks.combat.AntiKBSprintCheck;
+import com.koalaguard.engine.checks.combat.BowAimbotCheck;
 import com.koalaguard.engine.checks.combat.AimD;
 import com.koalaguard.engine.checks.combat.AimE;
 import com.koalaguard.engine.checks.combat.AimF;
@@ -13,6 +15,7 @@ import com.koalaguard.engine.checks.combat.AimH;
 import com.koalaguard.engine.checks.combat.AutoClickerCheck;
 import com.koalaguard.engine.checks.combat.HoneypotCheck;
 import com.koalaguard.engine.checks.combat.MaceCheck;
+import com.koalaguard.engine.checks.combat.MacroCheck;
 import com.koalaguard.engine.checks.combat.ShieldBypassCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
@@ -48,6 +51,7 @@ import com.koalaguard.engine.checks.player.CheatClientCheck;
 import com.koalaguard.engine.checks.player.InventoryActionCheck;
 import com.koalaguard.engine.checks.player.MultiTaskCheck;
 import com.koalaguard.engine.checks.player.OffhandCrashCheck;
+import com.koalaguard.engine.checks.player.SprintHungerCheck;
 import com.koalaguard.engine.checks.world.AirPlaceCheck;
 import com.koalaguard.engine.checks.world.AutoWebCheck;
 import com.koalaguard.engine.checks.world.FastBreakCheck;
@@ -116,6 +120,9 @@ public final class EngineManager {
         add(new HoneypotCheck(plugin));
         add(new MaceCheck(plugin));
         add(new ShieldBypassCheck(plugin));
+        add(new MacroCheck(plugin));
+        add(new AntiKBSprintCheck(plugin));
+        add(new BowAimbotCheck(plugin));
 
         // ── Inventory: interaction-chain state machines ──
         add(new InventoryChainCheck(plugin));
@@ -136,6 +143,7 @@ public final class EngineManager {
         add(new MultiTaskCheck(plugin));
         add(new InventoryActionCheck(plugin));
         add(new OffhandCrashCheck(plugin));
+        add(new SprintHungerCheck(plugin));
         add(new NukerCheck(plugin));
         add(new MultiPlaceCheck(plugin));
         add(new ScaffoldCheck(plugin));
