@@ -50,9 +50,12 @@ public final class PhysicsSimulator {
         double accel = onGround ? (sprint ? 0.13 : 0.10)
                                 : (sprint ? 0.026 : 0.02);
 
-        if (player.hasPotionEffect(PotionEffectType.SPEED)) {
-            int amp = player.getPotionEffect(PotionEffectType.SPEED).getAmplifier();
-            accel *= 1.0 + 0.20 * (amp + 1);
+        // Race-safe potion read: hasPotionEffect → getPotionEffect can return
+        // null if the effect ticks off between the two calls (NPE crashed the
+        // engine tick for that player, skipping every remaining check).
+        var spd = player.getPotionEffect(PotionEffectType.SPEED);
+        if (spd != null) {
+            accel *= 1.0 + 0.20 * (spd.getAmplifier() + 1);
         }
         if (player.hasPotionEffect(PotionEffectType.DOLPHINS_GRACE)) accel *= 1.5;
         float ws = player.getWalkSpeed();
@@ -82,8 +85,9 @@ public final class PhysicsSimulator {
         }
         double expectedDy = (prev.dy - gravity) * 0.98;
         double jumpImpulse = 0.42;
-        if (player.hasPotionEffect(PotionEffectType.JUMP_BOOST)) {
-            jumpImpulse += 0.1 * (player.getPotionEffect(PotionEffectType.JUMP_BOOST).getAmplifier() + 1);
+        var jb = player.getPotionEffect(PotionEffectType.JUMP_BOOST);
+        if (jb != null) {
+            jumpImpulse += 0.1 * (jb.getAmplifier() + 1);
         }
 
         r.expectedDy = expectedDy;

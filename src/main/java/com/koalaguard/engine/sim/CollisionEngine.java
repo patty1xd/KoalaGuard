@@ -150,16 +150,26 @@ public final class CollisionEngine {
         double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (dist < 0.10) return false;
         int steps = (int) Math.ceil(dist / 0.10) + 1;
-        double[] heights = { 0.10, 0.90, 1.60 };   // feet, mid, head
+        // Continuous Y sweep across the full vanilla 1.8-tall hitbox. The
+        // previous 3-fixed-height sample (0.10/0.90/1.60) missed any wall
+        // whose Y span fell BETWEEN samples — e.g. a 1-block wall at y+0.5..
+        // y+1.5 evaluated AIR/AIR/AIR and a vclip slipped through. Stepping
+        // 0.45 blocks (just less than the smallest non-air vanilla block
+        // height — a 0.5 slab) guarantees at least one body sample lands on
+        // any solid voxel the player's bounding box would intersect.
         for (int i = 0; i <= steps; i++) {
             double t = (double) i / steps;
             double cx = x0 + dx * t, cy = y0 + dy * t, cz = z0 + dz * t;
             int bx = (int) Math.floor(cx);
             int bz = (int) Math.floor(cz);
-            for (double hh : heights) {
+            for (double hh = 0.0; hh <= 1.80; hh += 0.45) {
                 int by = (int) Math.floor(cy + hh);
                 if (collidable(w.getBlockAt(bx, by, bz))) return true;
             }
+            // Always sample the very top of the body too (eye level), since
+            // a half-step hh increment could otherwise skip past 1.80 exactly.
+            int byTop = (int) Math.floor(cy + 1.80);
+            if (collidable(w.getBlockAt(bx, byTop, bz))) return true;
         }
         return false;
     }
