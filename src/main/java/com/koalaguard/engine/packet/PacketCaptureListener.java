@@ -328,7 +328,42 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             "quilt", "neoforge", "carpet"
     };
 
+    /** Per-player intake-overflow counters (visible via /kg debug). */
+    private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, long[]> DROPS
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
     private void offer(PlayerState s, CapturedPacket p) {
-        if (s.intake.size() < 4096) s.intake.offer(p);
+        // Silent drop is a DoS vector — a cheater can flood movement packets to
+        // fill the queue and silently disable detection on aux packets it cares
+        // about (attacks, totem moves). To address this:
+        //   1. If we would overflow, PREFER to drop a MOVEMENT packet over the
+        //      one we're trying to enqueue (so aux packets get priority).
+        //   2. Counters per player so /kg debug surfaces the flood and admins
+        //      can see when a player is overrunning the queue.
+        if (s.intake.size() < 4096) { s.intake.offer(p); return; }
+        long[] c = DROPS.computeIfAbsent(s.uuid, k -> new long[2]);
+        if (p.kind != PacketKind.MOVEMENT) {
+            // Auxiliary packet under pressure — try to evict ONE movement
+            // packet at the head of the queue to make room. ConcurrentLinkedQueue
+            // has no remove-by-predicate so we peek+drain a few until we hit
+            // movement or fall back to dropping the new packet.
+            int probes = 0;
+            for (CapturedPacket head; probes++ < 8 && (head = s.intake.peek()) != null; ) {
+                if (head.kind == PacketKind.MOVEMENT) {
+                    s.intake.poll();
+                    c[0]++;                                    // movement evictions
+                    s.intake.offer(p);
+                    return;
+                }
+                break; // head is also aux — keep it, drop the incoming.
+            }
+        }
+        c[1]++;                                                // total drops
+    }
+
+    /** Read-only snapshot of [movementEvictions, totalDrops] for telemetry. */
+    public static long[] getDropCounters(java.util.UUID id) {
+        long[] c = DROPS.get(id);
+        return c == null ? new long[]{0, 0} : new long[]{ c[0], c[1] };
     }
 }
