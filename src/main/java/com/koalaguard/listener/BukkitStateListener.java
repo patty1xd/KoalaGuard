@@ -97,6 +97,7 @@ public final class BukkitStateListener implements Listener {
         if (d == null) return;
         d.lastDamageMs = System.currentTimeMillis();
         d.engine.combat.lastDamageTakenTick = d.engine.tick;
+        d.engine.combat.lastDamageTakenNanos = System.nanoTime();
 
         // FIRST-totem trigger: damage taken while the off hand has NO totem.
         // (A totem already in the off hand is the pop path — handled by
