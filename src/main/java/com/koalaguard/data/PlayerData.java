@@ -59,6 +59,12 @@ public final class PlayerData {
     public volatile long clipSeq;
     public volatile String clipDetail = "";
 
+    /** Big un-graced single-tick displacement (>8 blocks, not through solid).
+     *  Stamped by EngineTask BEFORE the >8 baseline reset eats the frame, so
+     *  ClickTpCheck can see large free-air teleports. */
+    public volatile long clickTpSeq;
+    public volatile String clickTpDetail = "";
+
     // ───────────────── transaction / tick clock ─────────────────
     /** transaction id -> send nanoTime, pending until the client echoes Pong. */
     public final Map<Integer, Long> pendingTransactions = new ConcurrentHashMap<>();
