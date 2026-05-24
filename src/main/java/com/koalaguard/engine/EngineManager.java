@@ -17,6 +17,7 @@ import com.koalaguard.engine.checks.combat.HoneypotCheck;
 import com.koalaguard.engine.checks.combat.MaceCheck;
 import com.koalaguard.engine.checks.combat.MacroCheck;
 import com.koalaguard.engine.checks.combat.ShieldBypassCheck;
+import com.koalaguard.engine.checks.combat.SpoofedRotationCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
@@ -120,6 +121,7 @@ public final class EngineManager {
         add(new HoneypotCheck(plugin));
         add(new MaceCheck(plugin));
         add(new ShieldBypassCheck(plugin));
+        add(new SpoofedRotationCheck(plugin));
         add(new MacroCheck(plugin));
         add(new AntiKBSprintCheck(plugin));
         add(new BowAimbotCheck(plugin));
