@@ -55,17 +55,10 @@ public final class RotationCheck extends SimCheck {
             return;
         }
 
-        // 1c) Out-of-range yaw — vanilla wraps to (-180, 180]. A cheat that
-        //     forgets to normalise sends e.g. yaw=540°; the server stores the
-        //     raw value. Vanilla clients literally cannot emit |yaw| > 180.
-        //     (Replaces the previous |signedYawDelta|>180 check which was dead
-        //     code: signedYawDeltas() wraps to [-180,180] by construction.)
-        if (Math.abs(yaw) > cfgD("max-yaw-deg", 180.0001)) {
-            diverge(ctx, cfgD("invalid-pitch-score", 8.0),
-                    cfgD("threshold", 14.0), cfgI("min-streak", 1),
-                    String.format("yaw %.1f° out of (-180,180]", yaw), false);
-            return;
-        }
+        // (Out-of-range yaw check removed: Optifine/Sodium/some 1.21 clients
+        //  briefly emit unwrapped yaw at the ±180° boundary on legit movement,
+        //  which was the FP user reported as "false checks for anything if you
+        //  move a bit". NaN/Infinity still caught above.)
 
         // 2) Quantised aim — only while fighting, only on a large sample.
         long sinceAtk = ctx.state.tick - ctx.state.combat.lastAttackTick;
