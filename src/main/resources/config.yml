@@ -155,18 +155,15 @@ checks:
     max-violations: 12
     punishment: kick
     ban-duration: 7d
-    # Raised from 0.30 (auto-step impulse on stairs/slabs reaches ~0.42 when
-    # simGround misses for a tick). 0.40 cuts step-induced FPs while still
-    # catching a vanilla jump impulse (~0.42 fresh).
-    min-jump-impulse: 0.40
-    min-air-ticks: 6
-    # Single confirmed mid-air jump is vanilla-impossible after every grace
-    # (slime/bed/kb/levitation/web/elytra/teleport/special-block/ladder/
-    # water/slow-fall all exempt above). Streak=2 instead of 1 so a single
-    # transient simGround miss can't auto-rubber-band.
+    # Detection-restored 2026-05-24: streak=1, impulse=0.36, airTicks=4 — but
+    # the check now requires N consecutive non-simGround frames before
+    # confirming, which rules out the one-tick step-up FP without losing
+    # real AirJump detection (which produces sustained mid-air physics).
+    min-jump-impulse: 0.36
+    min-air-ticks: 4
     score: 12.0
     threshold: 9.0
-    min-streak: 2
+    min-streak: 1
 
   noslow:
     enabled: true
@@ -371,13 +368,16 @@ checks:
   autototemf:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, score: 5.0, threshold: 10.0, min-streak: 3 }
 
   # ── Additional movement checks ──
-  clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1 }
+  clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1, big-score: 20.0, big-min-streak: 1 }
   # Clip / phase-teleport — Meteor .vclip/.hclip/.tp & anything moving THROUGH
   # solid with no server teleport. Evaluated before the >8 reset that used to
   # discard it. Conclusive → confirms immediately + rubber-bands.
   # Clip — min-streak raised 1→2 so a single upstream ray-test FP doesn't
   # rubber-band a legit player. Real cheats still fire within ~100ms.
   clip:         { enabled: true, max-violations: 6,  punishment: kick, ban-duration: 30d, min-dist: 1.0, score: 15.0, threshold: 9.0, min-streak: 2 }
+  # ClickTp PATH-B (big-score/big-min-streak) handles the >8-block free-air
+  # teleport that the engine baseline-reset would otherwise eat — fires on
+  # the first stamped clickTpSeq, no streak.
   blink:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-frames-per-tick: 9, score-scale: 3.0, threshold: 9.0, min-streak: 2 }
   # Jesus + Dolphin/BounceJesus variant (accumulated descent over recent
   # frames stays near zero — vanilla swim continually sinks between strokes,
@@ -419,6 +419,34 @@ checks:
   # visibility). Lag-comp victim history; only clean acquisitions; flags only
   # when reaction is BOTH too fast AND too consistent over many engagements.
   aimh:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, engage-gap-ns: 1200000000, reach: 3.2, max-plausible-ms: 2000.0, sample-cap: 24, min-samples: 6, max-mean-ms: 90.0, max-sd-ms: 45.0, score: 7.0, threshold: 10.0, min-streak: 3 }
+
+  # SpoofedRotation — catches silent-aim / silent-scaffold / auto-crystal /
+  # any cheat that overrides the packet rotation to perfectly track an action
+  # target (Meteor / LiquidBounce / Wurst / Sigma). Samples the angular error
+  # from packet-stamped rotation to the action's geometric target across
+  # attacks AND block-places; flags when BOTH mean AND SD collapse below
+  # human anatomical limits over 18+ actions.
+  #
+  # max-mean-deg/max-sd-deg are the human floor — vanilla aiming has 3-8°
+  # SD even on a perfect lock; sub-1° / sub-0.5° over 18 actions is forged.
+  # max-sample-deg drops obvious misses (the cheat always lands square so
+  # 12°-off samples are not its signature and would only inflate variance).
+  spoofedrotation:
+    enabled: true
+    max-violations: 6
+    punishment: kick
+    ban-duration: permanent
+    sample-cap: 40
+    sample-stale-ns: 6000000000
+    min-samples: 18
+    min-span-ns: 1500000000
+    max-sample-deg: 12.0
+    max-mean-deg: 1.2
+    max-sd-deg: 0.6
+    reflag-cooldown-ns: 2000000000
+    score: 9.0
+    threshold: 9.0
+    min-streak: 1
   # Crystal break rate + respawn-anchor cycle rate. Catches classic
   # CrystalAura plus AnchorAura / safe-anchor / Wurst's AnchorAura. The
   # silent-aim part of aura attacks lands on AimA-H independently.
@@ -493,7 +521,12 @@ checks:
   # MultiTask — >=2 actions inside one uninterrupted item-use (eat/block/bow
   # + attack OR + block-place OR + drop). Vanilla cancels use the moment any
   # of these happen, so the use-flag staying open IS the contradiction.
-  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 2, use-stale-ms: 30000, score: 6.0, threshold: 9.0, min-streak: 2 }
+  # MultiTask — added use-fresh-ms: the latched netty `usingItem` flag is no
+  # longer trusted by itself. We require an actual USE_ITEM packet to have
+  # arrived in the last use-fresh-ms window before evaluating. Kills the FP
+  # where a lost RELEASE_USE_ITEM left the flag stuck and the player got
+  # flagged on any later attack with a continuous-use item still in hand.
+  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 2, use-stale-ms: 30000, use-fresh-ms: 4000, score: 6.0, threshold: 9.0, min-streak: 2 }
   # Inventory automation: AutoArmor / AutoTool / AutoMend (window-0 cluster
   # OR inv-click coincident with attack) AND ChestStealer / FastStealer /
   # AutoSteal (non-zero window-id burst — vanilla shift-click cap is 1/tick,
