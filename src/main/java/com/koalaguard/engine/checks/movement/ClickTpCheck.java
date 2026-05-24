@@ -25,15 +25,32 @@ public final class ClickTpCheck extends SimCheck {
 
     private final java.util.Map<java.util.UUID, Long> seenSeq
             = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<java.util.UUID, Long> seenBurst
+            = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public void onTick(CheckContext ctx) {
         PlayerState s = ctx.state;
+        java.util.UUID id = ctx.data.getUuid();
+
+        // PATH C: Meteor ClickTp StatusOnly-burst fingerprint — fires BEFORE
+        // the big position packet so the rubber-band can intercept it. Vanilla
+        // never sends 3+ rotation/position-less PLAYER_FLYING packets within
+        // <40ms each.
+        long burstSeq = ctx.data.clickTpBurstSeq;
+        Long seenB = seenBurst.get(id);
+        if (burstSeq != 0 && (seenB == null || seenB != burstSeq)) {
+            seenBurst.put(id, burstSeq);
+            diverge(ctx, cfgD("burst-score", 18.0), cfgD("threshold", 10.0),
+                    cfgI("burst-min-streak", 1),
+                    "clicktp StatusOnly burst: " + ctx.data.clickTpBurstSize
+                            + " status-only packets <40ms apart (Meteor pattern)", true);
+            return;
+        }
 
         // PATH A: the engine stamped a >8-block free-air teleport that the
         // baseline-reset would otherwise have eaten. Setback unconditionally.
         long tpSeq = ctx.data.clickTpSeq;
-        java.util.UUID id = ctx.data.getUuid();
         Long seen = seenSeq.get(id);
         if (tpSeq != 0 && (seen == null || seen != tpSeq)) {
             seenSeq.put(id, tpSeq);
@@ -76,5 +93,6 @@ public final class ClickTpCheck extends SimCheck {
     public void cleanup(java.util.UUID uuid) {
         super.cleanup(uuid);
         seenSeq.remove(uuid);
+        seenBurst.remove(uuid);
     }
 }
