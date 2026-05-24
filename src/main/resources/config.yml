@@ -368,13 +368,23 @@ checks:
   autototemf:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, score: 5.0, threshold: 10.0, min-streak: 3 }
 
   # ── Additional movement checks ──
-  clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1, big-score: 20.0, big-min-streak: 1 }
+  # ClickTp:
+  #   PATH-A: under-8-block single-tick burst (max-horizontal / max-vertical)
+  #   PATH-B (big-*): >8-block free-air teleport stamped by EngineTask before
+  #          the baseline reset eats it (Meteor's final position packet).
+  #   PATH-C (burst-*): Meteor ClickTp StatusOnly fingerprint — ≥3 PLAYER_FLYING
+  #          packets with no pos/no rot within <40ms each (the decoy burst the
+  #          cheat sends BEFORE the big position packet). Fires early, so the
+  #          rubber-band lands before the teleport even completes.
+  clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1, big-score: 20.0, big-min-streak: 1, burst-score: 18.0, burst-min-streak: 1 }
   # Clip / phase-teleport — Meteor .vclip/.hclip/.tp & anything moving THROUGH
   # solid with no server teleport. Evaluated before the >8 reset that used to
   # discard it. Conclusive → confirms immediately + rubber-bands.
-  # Clip — min-streak raised 1→2 so a single upstream ray-test FP doesn't
-  # rubber-band a legit player. Real cheats still fire within ~100ms.
-  clip:         { enabled: true, max-violations: 6,  punishment: kick, ban-duration: 30d, min-dist: 1.0, score: 15.0, threshold: 9.0, min-streak: 2 }
+  # Clip — min-streak BACK to 1: solidOnSegment is a reliable signal (the
+  # path actually contains a solid block) and waiting for a 2nd event means
+  # the first wall-phase ClickTp slips before rubber-band. False positives
+  # from upstream ray-test would only matter if solidOnSegment had bugs.
+  clip:         { enabled: true, max-violations: 6,  punishment: kick, ban-duration: 30d, min-dist: 1.0, score: 15.0, threshold: 9.0, min-streak: 1 }
   # ClickTp PATH-B (big-score/big-min-streak) handles the >8-block free-air
   # teleport that the engine baseline-reset would otherwise eat — fires on
   # the first stamped clickTpSeq, no streak.
@@ -431,18 +441,21 @@ checks:
   # SD even on a perfect lock; sub-1° / sub-0.5° over 18 actions is forged.
   # max-sample-deg drops obvious misses (the cheat always lands square so
   # 12°-off samples are not its signature and would only inflate variance).
+  # Consecutive-perfect-actions trigger:
+  #   perfect-deg     — an action with err ≤ this is "perfect" (Meteor's
+  #                     forged angle hits ≈0°; humans never sub-0.5°)
+  #   tolerant-deg    — > this resets the streak (clearly human)
+  #                     between perfect and tolerant just decrements
+  #   perfect-streak  — N perfects in a row → flag
+  # Fires after ~5 attacks without any variance window / sample minimum.
   spoofedrotation:
     enabled: true
     max-violations: 6
     punishment: kick
     ban-duration: permanent
-    sample-cap: 40
-    sample-stale-ns: 6000000000
-    min-samples: 18
-    min-span-ns: 1500000000
-    max-sample-deg: 12.0
-    max-mean-deg: 1.2
-    max-sd-deg: 0.6
+    perfect-deg: 0.50
+    tolerant-deg: 3.50
+    perfect-streak: 5
     reflag-cooldown-ns: 2000000000
     score: 9.0
     threshold: 9.0
