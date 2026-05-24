@@ -60,40 +60,13 @@ public final class RotationCheck extends SimCheck {
         //  which was the FP user reported as "false checks for anything if you
         //  move a bit". NaN/Infinity still caught above.)
 
-        // 2) Quantised aim — only while fighting, only on a large sample.
-        long sinceAtk = ctx.state.tick - ctx.state.combat.lastAttackTick;
-        if (ctx.state.combat.lastAttackTick < 0
-                || sinceAtk > cfgI("combat-window-ticks", 60)) {
-            clean(ctx, 0.5);
-            return;
-        }
-
-        List<Float> yd = ctx.state.yawDeltas(cfgI("samples", 60));
-        List<Double> active = new ArrayList<>();
-        for (float v : yd) if (v > 0.05f && v < 60f) active.add((double) v);
-        if (active.size() < cfgI("min-active", 45)) { clean(ctx, 0.4); return; }
-
-        double gcd = MathUtil.seriesGcd(active);
-        double minGcd = cfgD("min-gcd", 0.5);
-        if (gcd < minGcd) { clean(ctx, 1.0); return; }
-
-        // Fraction of samples that are an exact multiple of the step. A human
-        // raw-input mouse produces continuous floats — this stays ~0 for them.
-        double eps = cfgD("quantise-epsilon", 0.012);
-        int onStep = 0;
-        for (double v : active) {
-            double r = Math.abs(v / gcd - Math.rint(v / gcd));
-            if (r * gcd < eps) onStep++;
-        }
-        double frac = onStep / (double) active.size();
-
-        if (frac >= cfgD("min-quantised-fraction", 0.97)) {
-            diverge(ctx, cfgD("quantise-score", 6.0),
-                    cfgD("threshold", 14.0), cfgI("min-streak", 6),
-                    String.format("quantised aim: %.0f%% of %d turns are multiples of %.3f°",
-                            frac * 100, active.size(), gcd), false);
-        } else {
-            clean(ctx, 1.0);
-        }
+        // The previous "quantised aim" GCD analysis was removed: it was
+        // false-positive prone on raw-input mice and specific sensitivities
+        // (the leftover signal the user kept hitting). The silent-aim job is
+        // now owned end-to-end by SpoofedRotationCheck (angular variance to
+        // target across many actions), which is the correct mechanism per
+        // Meteor's actual source code — Meteor sends an exact computed angle
+        // every tick with no jitter, so variance is the unambiguous signal.
+        clean(ctx, 0.5);
     }
 }
