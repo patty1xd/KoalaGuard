@@ -212,10 +212,21 @@ public final class EngineTask extends BukkitRunnable {
                 boolean specialMove = s.exVehicle || s.exGliding || s.exRiptide
                                    || s.exLevitation || s.exWeb || s.exClimbing;
                 if (!graced && !specialMove) {
-                    d.clipSeq++;
-                    d.clipDetail = String.format(
-                            "ungraced >8-block teleport (dx=%.1f dy=%.1f dz=%.1f), no server teleport",
-                            dx, dy, dz);
+                    // Two paths: if the move went THROUGH solid → clip; if
+                    // not → clickTp (free-air teleport). Both rubber-band.
+                    boolean throughSolid = CollisionEngine.solidOnSegment(
+                            player.getWorld(), s.prevX, s.prevY, s.prevZ, x, y, z);
+                    if (throughSolid) {
+                        d.clipSeq++;
+                        d.clipDetail = String.format(
+                                "ungraced >8-block teleport through solid (dx=%.1f dy=%.1f dz=%.1f)",
+                                dx, dy, dz);
+                    } else {
+                        d.clickTpSeq++;
+                        d.clickTpDetail = String.format(
+                                "ungraced >8-block teleport (dx=%.1f dy=%.1f dz=%.1f)",
+                                dx, dy, dz);
+                    }
                 }
             }
             // reset baseline so reconstruction can resume on the next packet
