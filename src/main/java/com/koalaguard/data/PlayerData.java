@@ -65,6 +65,13 @@ public final class PlayerData {
     public volatile long clickTpSeq;
     public volatile String clickTpDetail = "";
 
+    /** Meteor ClickTp "StatusOnly burst" fingerprint — N consecutive
+     *  PLAYER_FLYING packets with no pos/rot inside a sub-50ms window, the
+     *  signature of the cheat's decoy-then-pos pattern. Stamped by
+     *  PacketCaptureListener, consumed by ClickTpCheck. */
+    public volatile long clickTpBurstSeq;
+    public volatile int  clickTpBurstSize;
+
     // ───────────────── transaction / tick clock ─────────────────
     /** transaction id -> send nanoTime, pending until the client echoes Pong. */
     public final Map<Integer, Long> pendingTransactions = new ConcurrentHashMap<>();
