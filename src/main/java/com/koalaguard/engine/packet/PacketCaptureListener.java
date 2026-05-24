@@ -78,6 +78,33 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             if (dropPos && w.hasPositionChanged()) {
                 event.setCancelled(true);                 // Mojang never sees it
             }
+
+            // Meteor ClickTp fingerprint: it sends N "StatusOnly(true,true)"
+            // packets (no pos, no rot, just onGround flags) in rapid succession
+            // before the big position packet. Vanilla emits one PLAYER_FLYING
+            // per tick (~50ms apart); a burst of ≥3 StatusOnly within <40ms
+            // is the literal pattern from Meteor's ClickTPCommand.java.
+            boolean statusOnly = !p.hasPos && !p.hasRot;
+            if (statusOnly) {
+                long lastNs = LAST_STATUS_NANOS.getOrDefault(uuid, 0L);
+                long gapNs = nanos - lastNs;
+                int run = STATUS_BURST.getOrDefault(uuid, 0);
+                if (gapNs < 40_000_000L) {                 // <40ms since previous
+                    run++;
+                    if (run >= 3) {                        // 3+ in a row inside 40ms each
+                        d.clickTpBurstSeq++;
+                        d.clickTpBurstSize = run;
+                    }
+                } else {
+                    run = 1;
+                }
+                STATUS_BURST.put(uuid, run);
+                LAST_STATUS_NANOS.put(uuid, nanos);
+            } else if (p.hasPos || p.hasRot) {
+                STATUS_BURST.remove(uuid);                 // any real movement resets
+                LAST_STATUS_NANOS.remove(uuid);
+            }
+
             offer(s, p);
             return;
         }
@@ -330,6 +357,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
 
     /** Per-player intake-overflow counters (visible via /kg debug). */
     private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, long[]> DROPS
+            = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Per-player StatusOnly burst tracking — Meteor ClickTp fingerprint. */
+    private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Integer> STATUS_BURST
+            = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> LAST_STATUS_NANOS
             = new java.util.concurrent.ConcurrentHashMap<>();
 
     private void offer(PlayerState s, CapturedPacket p) {
