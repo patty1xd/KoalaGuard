@@ -63,7 +63,13 @@ public final class MultiTaskCheck extends SimCheck {
         S s = state.computeIfAbsent(id, k -> new S());
 
         // Session still open (no RELEASE since the use began) AND a real
-        // continuous-use item is actually in a hand.
+        // continuous-use item is actually in a hand AND we can see a recent
+        // USE_ITEM packet in the log. The "recent USE_ITEM" gate kills the FP
+        // the user reported: a stale latched usingItem flag (lost
+        // RELEASE_USE_ITEM packet → flag never cleared → every later attack
+        // looks like multitask). If the flag is latched but no USE_ITEM has
+        // arrived in the last freshness window, we're dealing with a stale
+        // flag, not a real session — skip.
         boolean open = ctx.state.usingItem
                 && (continuousUse(ctx.state.inv.mainHand)
                  || continuousUse(ctx.state.inv.offHand));
@@ -71,6 +77,15 @@ public final class MultiTaskCheck extends SimCheck {
 
         long start = ctx.state.usingItemSinceNanos;
         long staleNs = cfgL("use-stale-ms", 30_000L) * 1_000_000L;
+        long freshNs = cfgL("use-fresh-ms", 4_000L) * 1_000_000L;
+        long nowNs = System.nanoTime();
+        boolean recentUse = false;
+        for (CapturedPacket p : ctx.state.log.recent(128)) {
+            if (p.kind == PacketKind.USE_ITEM && nowNs - p.recvNanos <= freshNs) {
+                recentUse = true; break;
+            }
+        }
+        if (!recentUse) { clean(ctx, 0.5); return; }    // stale latched flag — skip
 
         int attacks = 0, placements = 0, drops = 0, swaps = 0;
         long maxActionSeq = -1;
