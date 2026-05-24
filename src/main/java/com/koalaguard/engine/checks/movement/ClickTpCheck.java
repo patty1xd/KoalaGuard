@@ -23,9 +23,27 @@ public final class ClickTpCheck extends SimCheck {
     @Override
     public Stage stage() { return Stage.FRAME; }
 
+    private final java.util.Map<java.util.UUID, Long> seenSeq
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
     @Override
     public void onTick(CheckContext ctx) {
         PlayerState s = ctx.state;
+
+        // PATH A: the engine stamped a >8-block free-air teleport that the
+        // baseline-reset would otherwise have eaten. Setback unconditionally.
+        long tpSeq = ctx.data.clickTpSeq;
+        java.util.UUID id = ctx.data.getUuid();
+        Long seen = seenSeq.get(id);
+        if (tpSeq != 0 && (seen == null || seen != tpSeq)) {
+            seenSeq.put(id, tpSeq);
+            diverge(ctx, cfgD("big-score", 20.0), cfgD("threshold", 10.0),
+                    cfgI("big-min-streak", 1),
+                    "clicktp: " + ctx.data.clickTpDetail, true);
+            return;
+        }
+
+        // PATH B: under-8-block fast tick — the frame DID push, evaluate normally.
         PositionFrame f = s.current;
         if (f == null) return;
 
@@ -52,5 +70,11 @@ public final class ClickTpCheck extends SimCheck {
         } else {
             clean(ctx, 3.0);
         }
+    }
+
+    @Override
+    public void cleanup(java.util.UUID uuid) {
+        super.cleanup(uuid);
+        seenSeq.remove(uuid);
     }
 }

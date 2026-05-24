@@ -44,13 +44,25 @@ public final class AirJumpCheck extends SimCheck {
             return;
         }
 
-        // Auto-step impulses (stairs/slabs) can produce dy~0.42 when the
-        // simulator briefly misses simGround, FP'ing with min-streak=1. Lift
-        // the impulse floor close to the actual vanilla jump (~0.42) and the
-        // airTicks threshold so a one-tick simGround miss can't confirm.
-        double impulse = cfgD("min-jump-impulse", 0.40);
+        // Detection-restored: streak=1, impulse=0.36, airTicks=4 — but with a
+        // stricter "really airborne" double-check: NONE of the last 4 frames
+        // can be simGround. Step-up FP source was one-tick simGround miss
+        // surrounded by simGround=true frames; requiring 4 consecutive non-
+        // ground frames rules that out without losing real AirJump detection
+        // (which produces sustained mid-air physics).
+        double impulse = cfgD("min-jump-impulse", 0.36);
         boolean freshJump = f.dy > impulse && prev.dy <= 0.0;
-        boolean airborne  = !f.simGround && s.airTicks > cfgI("min-air-ticks", 6);
+        int needAir = cfgI("min-air-ticks", 4);
+        boolean airborne  = !f.simGround && s.airTicks > needAir;
+        if (airborne) {
+            int sustainedAir = 0;
+            for (PositionFrame g : s.recentFrames(needAir + 2)) {
+                if (g.simGround) break;
+                sustainedAir++;
+                if (sustainedAir >= needAir) break;
+            }
+            if (sustainedAir < needAir) airborne = false;
+        }
 
         if (freshJump && airborne) {
             // Vanilla-impossible. A single confirmed mid-air jump is conclusive
@@ -59,7 +71,7 @@ public final class AirJumpCheck extends SimCheck {
             // immediate setback (the setback path is now synchronous, so the
             // player is rubber-banded the same tick).
             diverge(ctx, cfgD("score", 12.0), cfgD("threshold", 9.0),
-                    cfgI("min-streak", 2),
+                    cfgI("min-streak", 1),
                     String.format("air jump dy=%.3f after %d air ticks", f.dy, s.airTicks),
                     true);
         } else {
