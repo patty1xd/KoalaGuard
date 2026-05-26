@@ -87,7 +87,30 @@ public final class MultiTaskCheck extends SimCheck {
         }
         if (!recentUse) { clean(ctx, 0.5); return; }    // stale latched flag — skip
 
-        int attacks = 0, placements = 0, drops = 0, swaps = 0;
+        // Draining-tail grace: when the client sends RELEASE_USE_ITEM the
+        // server may still process the action packet a tick or two later
+        // because packets can arrive bunched. Per research, the vanilla
+        // packet ORDER between RELEASE_USE_ITEM and a following Q-drop /
+        // F-swap is NOT guaranteed — the client sends them in input order,
+        // they arrive bunched, the server processes in receive order, and
+        // the netty usingItem flag may briefly still be true. That race
+        // produced the user-reported FPs. If a RELEASE was seen recently,
+        // treat the rest of this tick as a closing use-session and skip.
+        long releaseGraceNs = cfgL("release-grace-ms", 200L) * 1_000_000L;
+        for (CapturedPacket p : ctx.state.log.recent(64)) {
+            if (p.kind == PacketKind.DIGGING && "RELEASE_USE_ITEM".equals(p.strA)
+                    && nowNs - p.recvNanos <= releaseGraceNs) {
+                return;                                  // session is closing
+            }
+        }
+
+        // Only count the ACTUAL cheat-defining actions: attacks and block-
+        // place. Drop-item (Q) and swap-hand (F) are race-prone per research
+        // — vanilla client may legitimately queue them in the same tick batch
+        // as the RELEASE that cancels the use. Counting them produced the
+        // user-reported FPs without catching any unique cheat behaviour the
+        // attack/place pair doesn't already cover.
+        int attacks = 0, placements = 0;
         long maxActionSeq = -1;
         for (CapturedPacket p : ctx.state.log.recent(256)) {
             if (p.recvNanos < start) continue;                 // before this use
@@ -100,36 +123,21 @@ public final class MultiTaskCheck extends SimCheck {
             } else if (p.kind == PacketKind.BLOCK_PLACE) {
                 placements++;
                 if (p.seq > maxActionSeq) maxActionSeq = p.seq;
-            } else if (p.kind == PacketKind.DIGGING && p.strA != null
-                    && (p.strA.equals("DROP_ITEM") || p.strA.equals("DROP_ALL_ITEMS"))) {
-                drops++;
-                if (p.seq > maxActionSeq) maxActionSeq = p.seq;
-            } else if (p.kind == PacketKind.DIGGING && p.strA != null
-                    && p.strA.equals("SWAP_ITEM_WITH_OFFHAND")) {
-                // Vanilla cancels USE_ITEM the instant F is pressed (offhand
-                // swap aborts the continuous-use animation). Seeing the swap
-                // packet while the session flag is still open is a synthetic
-                // chain — the cheat suppressed the RELEASE_USE_ITEM that
-                // vanilla would have sent.
-                swaps++;
-                if (p.seq > maxActionSeq) maxActionSeq = p.seq;
             }
         }
 
-        // Vanilla: starting ANY of these actions cancels a continuous-use item
-        // (the client sends RELEASE_USE_ITEM first). The use-session flag
-        // therefore can ONLY be open while none have happened. Any single
-        // action mid-session is already vanilla-impossible; threshold is
-        // generous to avoid sub-tick race windows.
-        int totalActions = attacks + placements + drops + swaps;
-        int max = cfgI("max-actions-in-use", 2);
+        // Vanilla: starting an attack or block-place cancels a continuous-use
+        // item (the client sends RELEASE_USE_ITEM first). The use-session
+        // flag staying open through ≥3 attacks/places IS the cheat signature
+        // — a single race-window action no longer flags.
+        int totalActions = attacks + placements;
+        int max = cfgI("max-actions-in-use", 3);
         if (totalActions >= max && maxActionSeq > s.reportedSeq) {
             s.reportedSeq = maxActionSeq;
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 9.0),
                     cfgI("min-streak", 2),
                     "actions during uninterrupted item-use: "
-                            + attacks + " attack, " + placements + " place, "
-                            + drops + " drop, " + swaps + " hand-swap",
+                            + attacks + " attack, " + placements + " place",
                     false);
         }
     }
