@@ -165,36 +165,21 @@ checks:
     threshold: 9.0
     min-streak: 1
 
+  # NoSlow — COBWEB-ONLY. Vanilla freezes the player inside a cobweb
+  # (≲0.05 b/t); cheat moves at normal speed. Only fires when the player
+  # is physically in/on/under a cobweb block AND speed exceeds the cap.
+  # Soul-sand and use-item branches removed by request — too many edge
+  # cases (slabs/water-logged/soul-speed boots) and PredictionCheck's
+  # envelope already covers the use-item case via vanilla physics.
   noslow:
     enabled: true
     max-violations: 12
     punishment: kick
     ban-duration: 7d
     max-web-speed: 0.12
-    max-soulsand-speed: 0.16
     score-scale: 50.0
     threshold: 9.0
     min-streak: 4
-    # Use-item slowdown bypass (sprint while eating / drawing bow / blocking
-    # / using spyglass / drinking). Threshold set sprint-magnitude so legit
-    # walking-while-eating (~0.04 b/t) never trips; the cheat lets the
-    # player keep near-sprint speed (~0.281 b/t) instead.
-    # USE-ONSET GRACE: vanilla doesn't immediately clamp velocity when
-    # USE_ITEM starts — there's a 1-3 tick window where the player carries
-    # over their previous sprint frame. Without this grace, the check
-    # false-alerts on every legit eat-while-sprinting onset.
-    # Raised from 0.15 (which was BELOW vanilla walk speed ~0.215 and FP'd on
-    # every walking-while-eating). 0.24 sits above walk speed and below sprint
-    # — only sustained sprint-while-using trips it.
-    max-use-speed: 0.24
-    use-score-scale: 30.0
-    use-min-streak: 6
-    use-grace-ms: 350
-    # Hard timeout on a use-item session — if `usingItem` stayed latched past
-    # this without a RELEASE_USE_ITEM packet (lost-packet / instant-use latch
-    # bug), clear the gate so the check stops FP'ing for the rest of the
-    # connection.
-    use-max-session-ms: 8000
 
   # ── COMBAT (reconstructed-position raytrace + aim) ──
   # Lag-compensated: takes the SMALLEST eye→hitbox distance over the victim's
@@ -429,6 +414,14 @@ checks:
   # visibility). Lag-comp victim history; only clean acquisitions; flags only
   # when reaction is BOTH too fast AND too consistent over many engagements.
   aimh:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, engage-gap-ns: 1200000000, reach: 3.2, max-plausible-ms: 2000.0, sample-cap: 24, min-samples: 6, max-mean-ms: 90.0, max-sd-ms: 45.0, score: 7.0, threshold: 10.0, min-streak: 3 }
+  # aimI — ROTATION-MOVEMENT DESYNC. The strongest server-side catch for
+  # Meteor / LiquidBounce silent-aim. Per research: the cheat mutates the
+  # outgoing packet's yaw but leaves dx/dz computed from the REAL local yaw,
+  # so the implied "intent yaw" (atan2(-dx, dz)) disagrees with the reported
+  # yaw by something OTHER than an integer multiple of 45° (the 8 valid
+  # WASD-combinations). Sustained mean residual >10° = silent-aim signature.
+  # Sample is in-combat moving frames only; alert-only.
+  aimi:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, min-speed: 0.10, sample-cap: 60, min-samples: 36, max-mean-residual: 10.0, min-sd-residual: 0.0, score: 6.0, threshold: 11.0, min-streak: 4 }
 
   # SpoofedRotation — catches silent-aim / silent-scaffold / auto-crystal /
   # any cheat that overrides the packet rotation to perfectly track an action
@@ -460,6 +453,11 @@ checks:
     score: 9.0
     threshold: 9.0
     min-streak: 1
+    # Temporary diagnostic: prints one console line per sampled action with
+    # the measured angular error so you can see exactly what's happening
+    # without enabling global `debug: true`. Set false when you've confirmed
+    # the check is firing on real cheats.
+    log-samples: true
   # Crystal break rate + respawn-anchor cycle rate. Catches classic
   # CrystalAura plus AnchorAura / safe-anchor / Wurst's AnchorAura. The
   # silent-aim part of aura attacks lands on AimA-H independently.
@@ -539,7 +537,12 @@ checks:
   # arrived in the last use-fresh-ms window before evaluating. Kills the FP
   # where a lost RELEASE_USE_ITEM left the flag stuck and the player got
   # flagged on any later attack with a continuous-use item still in hand.
-  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 2, use-stale-ms: 30000, use-fresh-ms: 4000, score: 6.0, threshold: 9.0, min-streak: 2 }
+  # FP-hardened: ≥3 attacks-or-places (not 2) inside the session, and the
+  # racy drop/swap actions are no longer counted (vanilla packet ORDER between
+  # RELEASE_USE_ITEM and a same-tick Q-drop / F-swap isn't guaranteed — they
+  # arrive bunched). A 200ms RELEASE-grace also skips tail-of-session actions
+  # so a closing use never trips it.
+  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 3, use-stale-ms: 30000, use-fresh-ms: 4000, release-grace-ms: 200, score: 6.0, threshold: 9.0, min-streak: 2 }
   # Inventory automation: AutoArmor / AutoTool / AutoMend (window-0 cluster
   # OR inv-click coincident with attack) AND ChestStealer / FastStealer /
   # AutoSteal (non-zero window-id burst — vanilla shift-click cap is 1/tick,
@@ -632,16 +635,24 @@ checks:
     threshold: 9.0
     min-streak: 2
 
-  # AntiKnockback-Sprint — vanilla cancels sprint on damage (auto-sends
-  # STOP_SPRINTING). Cheats suppress that packet to keep the ~30% movement
-  # advantage. After damage, if the player is still sprinting AND moving at
-  # sprint speed past the window with no STOP_SPRINTING in the log → flag.
+  # AntiKnockback-Sprint — three gates ALL required to flag:
+  #  S0 damage event must have produced a server-side knockback (skips
+  #     fire/fall/magic/hunger — vanilla doesn't auto-stop sprint on those).
+  #  S1 no STOP_SPRINTING packet in the (widened) window after the damage tick.
+  #  S2 sustained pattern across ≥3 consecutive kb-damage events with no STOP
+  #     between any of them. A single race-window miss never confirms.
+  # DISABLED by default per research recommendation — even with the gates, the
+  # metric is sensitive to server packet-jitter on some configurations. Watch
+  # debug:true logs and enable + tune if you see consistent miss-patterns.
   antikbsprint:
-    enabled: true
+    enabled: false
     max-violations: 10
     punishment: kick
     ban-duration: 14d
-    post-damage-window-ticks: 3
+    post-damage-window-ticks: 6
+    kb-window-ms: 250
+    streak-window-ms: 4000
+    min-miss-streak: 3
     min-sprint-speed: 0.20
     score: 6.0
     threshold: 9.0
