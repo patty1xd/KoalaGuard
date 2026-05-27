@@ -1,24 +1,36 @@
 package com.koalaguard.command;
 
 import com.koalaguard.KoalaGuard;
+import com.koalaguard.engine.replay.ReplayPlayer;
+import com.koalaguard.engine.replay.ReplayReader;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
+import java.io.File;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
 
     private static final TextColor BRAND = TextColor.color(0x4FC3F7);
+    private static final DateTimeFormatter LIST_FMT = DateTimeFormatter
+            .ofPattern("MMM dd HH:mm").withZone(ZoneId.systemDefault());
     private final KoalaGuard plugin;
+    private final Map<UUID, ReplayPlayer> activeReplays = new HashMap<>();
 
     public KoalaGuardCommand(KoalaGuard plugin) {
         this.plugin = plugin;
@@ -33,10 +45,10 @@ public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
         if (args.length == 0) { help(sender); return true; }
 
         // Per-subcommand permissions — `koalaguard.admin` opens the door,
-        // but `unban` / `tp` need explicit grants since the broad `admin`
-        // perm is often handed to deputies who should only see info.
+        // but `unban` / `tp` / `replay` need explicit grants since the broad
+        // `admin` perm is often handed to deputies who should only see info.
         String sub = args[0].toLowerCase();
-        if ((sub.equals("unban") || sub.equals("tp"))
+        if ((sub.equals("unban") || sub.equals("tp") || sub.equals("replay"))
                 && !sender.hasPermission("koalaguard.admin." + sub)
                 && !sender.hasPermission("koalaguard.admin.*")) {
             msg(sender, "Missing permission koalaguard.admin." + sub, NamedTextColor.RED);
@@ -84,6 +96,7 @@ public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
             case "discord" -> msg(sender, "Discord: " + (plugin.getDiscordBot().isConnected()
                     ? "connected" : "disconnected"),
                     plugin.getDiscordBot().isConnected() ? NamedTextColor.GREEN : NamedTextColor.RED);
+            case "replay" -> handleReplay(sender, args);
             case "checks" -> {
                 sender.sendMessage(prefix().append(Component.text("Loaded checks:", NamedTextColor.GRAY)));
                 plugin.getEngine().all().values().forEach(c ->
@@ -116,6 +129,67 @@ public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void handleReplay(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            msg(sender, "Usage: /kg replay <list|play|stop> [token]", NamedTextColor.RED);
+            return;
+        }
+        switch (args[1].toLowerCase()) {
+            case "list" -> {
+                File[] files = plugin.getReplayManager().listReplays();
+                if (files.length == 0) { msg(sender, "No replays saved yet.", NamedTextColor.GRAY); return; }
+                sender.sendMessage(prefix().append(Component.text(
+                        "Saved replays (" + files.length + ", newest first):", NamedTextColor.GRAY)));
+                int shown = Math.min(files.length, 20);
+                for (int i = 0; i < shown; i++) {
+                    File f = files[i];
+                    sender.sendMessage(Component.text("  " + LIST_FMT.format(
+                                    Instant.ofEpochMilli(f.lastModified())) + "  ", NamedTextColor.DARK_GRAY)
+                            .append(Component.text(f.getName(), NamedTextColor.WHITE)));
+                }
+                if (files.length > shown) {
+                    msg(sender, "(+" + (files.length - shown) + " older)", NamedTextColor.DARK_GRAY);
+                }
+            }
+            case "play" -> {
+                if (!(sender instanceof Player viewer)) { msg(sender, "Players only.", NamedTextColor.RED); return; }
+                if (args.length < 3) { msg(sender, "Usage: /kg replay play <name|file>", NamedTextColor.RED); return; }
+                File f = plugin.getReplayManager().findReplay(args[2]);
+                if (f == null) { msg(sender, "No replay matched: " + args[2], NamedTextColor.RED); return; }
+
+                ReplayPlayer existing = activeReplays.remove(viewer.getUniqueId());
+                if (existing != null) existing.stop();
+
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    try {
+                        ReplayReader.Loaded loaded = ReplayReader.read(f);
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            if (!viewer.isOnline()) return;
+                            ReplayPlayer rp = new ReplayPlayer(plugin, viewer, loaded.name(), loaded.frames());
+                            activeReplays.put(viewer.getUniqueId(), rp);
+                            rp.start();
+                            msg(viewer, "Replaying " + loaded.name() + " (" + loaded.frames().size()
+                                    + " frames, " + loaded.durationMs() + " ms) — reason: "
+                                    + (loaded.reason() == null ? "?" : loaded.reason()),
+                                    NamedTextColor.GREEN);
+                        });
+                    } catch (Exception ex) {
+                        Bukkit.getScheduler().runTask(plugin, () ->
+                                msg(viewer, "Replay load failed: " + ex.getMessage(), NamedTextColor.RED));
+                    }
+                });
+            }
+            case "stop" -> {
+                if (!(sender instanceof Player viewer)) { msg(sender, "Players only.", NamedTextColor.RED); return; }
+                ReplayPlayer rp = activeReplays.remove(viewer.getUniqueId());
+                if (rp == null) { msg(sender, "No active replay.", NamedTextColor.GRAY); return; }
+                rp.stop();
+                msg(sender, "Replay stopped.", NamedTextColor.GREEN);
+            }
+            default -> msg(sender, "Usage: /kg replay <list|play|stop> [token]", NamedTextColor.RED);
+        }
+    }
+
     private Component prefix() {
         return Component.text("⟦KoalaGuard⟧ ", BRAND, TextDecoration.BOLD);
     }
@@ -130,17 +204,28 @@ public final class KoalaGuardCommand implements CommandExecutor, TabCompleter {
                 NamedTextColor.WHITE));
         s.sendMessage(Component.text("  /kg bans  /kg unban <p|uuid>  /kg discord",
                 NamedTextColor.WHITE));
+        s.sendMessage(Component.text("  /kg replay list|play <token>|stop",
+                NamedTextColor.WHITE));
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1)
-            return List.of("reload", "checks", "info", "tp", "bans", "unban", "discord");
+            return List.of("reload", "checks", "info", "tp", "bans", "unban", "discord", "replay");
         if (args.length == 2 && (args[0].equalsIgnoreCase("info")
                 || args[0].equalsIgnoreCase("tp") || args[0].equalsIgnoreCase("violations"))) {
             List<String> names = new ArrayList<>();
             plugin.getServer().getOnlinePlayers().forEach(p -> names.add(p.getName()));
             return names;
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("replay")) {
+            return List.of("list", "play", "stop");
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("replay")
+                && args[1].equalsIgnoreCase("play")) {
+            List<String> out = new ArrayList<>();
+            for (File f : plugin.getReplayManager().listReplays()) out.add(f.getName());
+            return out;
         }
         return List.of();
     }
