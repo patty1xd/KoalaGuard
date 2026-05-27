@@ -47,6 +47,7 @@ public final class BukkitStateListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         plugin.getDataManager().create(event.getPlayer());
+        plugin.getReplayManager().start(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -54,6 +55,7 @@ public final class BukkitStateListener implements Listener {
         plugin.getDataManager().remove(event.getPlayer().getUniqueId());
         plugin.getViolationManager().clearPlayer(event.getPlayer().getUniqueId());
         plugin.getEngine().cleanup(event.getPlayer().getUniqueId());
+        plugin.getReplayManager().stop(event.getPlayer().getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -98,6 +100,12 @@ public final class BukkitStateListener implements Listener {
         d.lastDamageMs = System.currentTimeMillis();
         d.engine.combat.lastDamageTakenTick = d.engine.tick;
         d.engine.combat.lastDamageTakenNanos = System.nanoTime();
+
+        // Replay annotation — damage taken (visualises hits the player ate).
+        var hurtFrame = new com.koalaguard.engine.replay.ReplayFrame(
+                System.nanoTime(), com.koalaguard.engine.replay.ReplayKind.HURT);
+        hurtFrame.yaw = (float) event.getFinalDamage();
+        plugin.getReplayManager().record(p.getUniqueId(), hurtFrame);
 
         // FIRST-totem trigger: damage taken while the off hand has NO totem.
         // (A totem already in the off hand is the pop path — handled by
@@ -509,6 +517,9 @@ public final class BukkitStateListener implements Listener {
     public void onDeath(PlayerDeathEvent event) {
         PlayerData d = plugin.getDataManager().get(event.getEntity());
         if (d != null) d.lastDeathMs = System.currentTimeMillis();
+        plugin.getReplayManager().record(event.getEntity().getUniqueId(),
+                new com.koalaguard.engine.replay.ReplayFrame(
+                        System.nanoTime(), com.koalaguard.engine.replay.ReplayKind.DEATH));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
