@@ -9,6 +9,7 @@ import com.koalaguard.engine.EngineManager;
 import com.koalaguard.engine.EngineTask;
 import com.koalaguard.engine.lag.TransactionDriver;
 import com.koalaguard.engine.packet.PacketCaptureListener;
+import com.koalaguard.engine.replay.ReplayManager;
 import com.koalaguard.listener.BukkitStateListener;
 import com.koalaguard.logging.KoalaGuardLogs;
 import com.koalaguard.manager.BanManager;
@@ -43,6 +44,7 @@ public final class KoalaGuard extends JavaPlugin {
     private AlertManager alertManager;
     private ViolationManager violationManager;
     private SetbackManager setbackManager;
+    private ReplayManager replayManager;
     private EngineManager engine;
 
     @Override
@@ -69,6 +71,7 @@ public final class KoalaGuard extends JavaPlugin {
         alertManager     = new AlertManager(this);
         violationManager = new ViolationManager(this);
         setbackManager   = new SetbackManager(this);
+        replayManager    = new ReplayManager(this);
 
         engine = new EngineManager(this);
         engine.registerAll();
@@ -87,7 +90,10 @@ public final class KoalaGuard extends JavaPlugin {
         getCommand("koalaguard").setExecutor(cmd);
         getCommand("koalaguard").setTabCompleter(cmd);
 
-        Bukkit.getOnlinePlayers().forEach(p -> dataManager.create(p));
+        Bukkit.getOnlinePlayers().forEach(p -> {
+            dataManager.create(p);
+            replayManager.start(p);
+        });
 
         getLogger().info("KoalaGuard v" + getPluginMeta().getVersion()
                 + " enabled (server-authoritative engine) — protecting "
@@ -113,5 +119,6 @@ public final class KoalaGuard extends JavaPlugin {
     public AlertManager getAlertManager()         { return alertManager; }
     public ViolationManager getViolationManager() { return violationManager; }
     public SetbackManager getSetbackManager()     { return setbackManager; }
+    public ReplayManager getReplayManager()       { return replayManager; }
     public EngineManager getEngine()              { return engine; }
 }
