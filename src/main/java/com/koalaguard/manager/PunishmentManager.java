@@ -42,6 +42,10 @@ public final class PunishmentManager {
         switch (p) {
             case "ban" -> {
                 String duration = check.banDuration();
+                // Snapshot the rolling buffer BEFORE the ban — once the kick
+                // packet flushes, the player session can be torn down at any
+                // time and the buffer with it.
+                plugin.getReplayManager().saveOnBan(player, check.getName());
                 plugin.getBanManager().ban(player, check.getName(), duration);
                 plugin.getAlertManager().sendPunishment(alert);
             }
