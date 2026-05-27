@@ -27,17 +27,21 @@ permissions:
   koalaguard.admin.tp:
     description: Teleport to a player via /kg tp
     default: op
+  koalaguard.admin.replay:
+    description: List, play and stop saved player-ban replays
+    default: op
   koalaguard.admin.*:
-    description: All admin sub-permissions (info / unban / tp)
+    description: All admin sub-permissions (info / unban / tp / replay)
     default: op
     children:
       koalaguard.admin.info: true
       koalaguard.admin.unban: true
       koalaguard.admin.tp: true
+      koalaguard.admin.replay: true
 
 commands:
   koalaguard:
     description: KoalaGuard admin command
     aliases: [ kg, koala ]
     permission: koalaguard.admin
-    usage: /koalaguard <reload|checks|info|tp|bans|unban|discord>
+    usage: /koalaguard <reload|checks|info|tp|bans|unban|discord|replay>

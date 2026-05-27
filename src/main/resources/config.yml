@@ -55,6 +55,18 @@ violation-decay: 1.0
 decay-interval: 30
 reward-decay: 0.05
 
+# ── Replay / packet recorder ──────────────────────────────────────
+# Per-player rolling buffer that captures movement / rotation / hits /
+# block placements / inventory clicks for the last N seconds. The
+# buffer lives only in memory; it is written to disk (compressed) ONLY
+# when the anticheat itself bans the player. Saved files live in
+# plugins/KoalaGuard/replays/ and can be played back with /kg replay
+# play <token> — a packet-level NPC visible only to the staff viewer.
+replay:
+  enabled: true
+  window-seconds: 30
+  save-on-ban: true
+
 discord:
   bot-token: ""
   alert-channel-id: ""
