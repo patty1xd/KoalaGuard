@@ -16,6 +16,9 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPl
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPong;
 import com.koalaguard.KoalaGuard;
 import com.koalaguard.data.PlayerData;
+import com.koalaguard.engine.replay.ReplayFrame;
+import com.koalaguard.engine.replay.ReplayKind;
+import com.koalaguard.engine.replay.ReplayManager;
 import com.koalaguard.engine.state.PlayerState;
 
 import java.nio.charset.StandardCharsets;
@@ -46,6 +49,7 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
         PlayerData d = plugin.getDataManager().get(uuid);
         if (d == null) return;
         PlayerState s = d.engine;
+        ReplayManager replay = plugin.getReplayManager();
 
         long nanos = System.nanoTime();
         var type = event.getPacketType();
@@ -106,6 +110,15 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             }
 
             offer(s, p);
+            if (replay != null && (p.hasPos || p.hasRot)) {
+                ReplayKind rk = p.hasPos && p.hasRot ? ReplayKind.MOVE
+                        : p.hasPos ? ReplayKind.POS : ReplayKind.ROTATE;
+                ReplayFrame rf = new ReplayFrame(nanos, rk);
+                rf.x = p.x; rf.y = p.y; rf.z = p.z;
+                rf.yaw = p.yaw; rf.pitch = p.pitch;
+                rf.onGround = p.onGround;
+                replay.record(uuid, rf);
+            }
             return;
         }
 
@@ -128,6 +141,14 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 event.setCancelled(true);
             }
             offer(s, p);          // still recorded so detection keeps running
+            if (replay != null) {
+                ReplayKind rk = w.getAction() == WrapperPlayClientInteractEntity.InteractAction.ATTACK
+                        ? ReplayKind.ATTACK : ReplayKind.ANIMATE;
+                ReplayFrame rf = new ReplayFrame(nanos, rk);
+                rf.intA = w.getEntityId();
+                rf.yaw = s.netYaw; rf.pitch = s.netPitch;
+                replay.record(uuid, rf);
+            }
             return;
         }
 
@@ -137,6 +158,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             p.pitch = s.netPitch;
             p.hasRot = true;
             offer(s, p);
+            if (replay != null) {
+                ReplayFrame rf = new ReplayFrame(nanos, ReplayKind.ANIMATE);
+                rf.yaw = s.netYaw; rf.pitch = s.netPitch;
+                replay.record(uuid, rf);
+            }
             return;
         }
 
@@ -152,6 +178,16 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.ENTITY_ACTION, nanos);
             p.strA = w.getAction().name();
             offer(s, p);
+            if (replay != null) {
+                ReplayKind rk = switch (w.getAction()) {
+                    case START_SPRINTING -> ReplayKind.SPRINT_START;
+                    case STOP_SPRINTING  -> ReplayKind.SPRINT_STOP;
+                    case START_SNEAKING  -> ReplayKind.SNEAK_START;
+                    case STOP_SNEAKING   -> ReplayKind.SNEAK_STOP;
+                    default              -> null;
+                };
+                if (rk != null) replay.record(uuid, new ReplayFrame(nanos, rk));
+            }
             return;
         }
 
@@ -160,6 +196,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.HELD_ITEM, nanos);
             p.intA = w.getSlot();
             offer(s, p);
+            if (replay != null) {
+                ReplayFrame rf = new ReplayFrame(nanos, ReplayKind.HELD_ITEM);
+                rf.intA = w.getSlot();
+                replay.record(uuid, rf);
+            }
             return;
         }
 
@@ -178,6 +219,12 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 }
             } catch (Throwable ignored) { }
             offer(s, p);
+            if (replay != null) {
+                ReplayFrame rf = new ReplayFrame(nanos, ReplayKind.DIG);
+                rf.x = p.x; rf.y = p.y; rf.z = p.z;
+                rf.byteA = (byte) a.ordinal();
+                replay.record(uuid, rf);
+            }
             return;
         }
 
@@ -185,6 +232,7 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             s.usingItem = true;
             s.usingItemSinceNanos = nanos;
             offer(s, new CapturedPacket(seq.getAndIncrement(), PacketKind.USE_ITEM, nanos));
+            if (replay != null) replay.record(uuid, new ReplayFrame(nanos, ReplayKind.USE_ITEM));
             return;
         }
 
@@ -203,6 +251,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             bp.pitch = s.netPitch;
             bp.hasRot = true;
             offer(s, bp);
+            if (replay != null) {
+                ReplayFrame rf = new ReplayFrame(nanos, ReplayKind.BLOCK_PLACE);
+                rf.x = bp.x; rf.y = bp.y; rf.z = bp.z;
+                replay.record(uuid, rf);
+            }
             return;
         }
 
@@ -217,11 +270,17 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 p.intB = w.getWindowId();   // 0  = player inventory menu
             } catch (Throwable ignored) { }
             offer(s, p);
+            if (replay != null) {
+                ReplayFrame rf = new ReplayFrame(nanos, ReplayKind.INV_CLICK);
+                rf.intA = p.intA; rf.intB = p.intB;
+                replay.record(uuid, rf);
+            }
             return;
         }
 
         if (type == PacketType.Play.Client.CLOSE_WINDOW) {
             offer(s, new CapturedPacket(seq.getAndIncrement(), PacketKind.CLOSE_WINDOW, nanos));
+            if (replay != null) replay.record(uuid, new ReplayFrame(nanos, ReplayKind.INV_CLOSE));
             return;
         }
 
