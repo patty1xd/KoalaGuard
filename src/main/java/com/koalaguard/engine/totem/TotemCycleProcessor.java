@@ -139,8 +139,20 @@ public final class TotemCycleProcessor {
             gaps[i - 1] = (burst.get(i).recvNanos - burst.get(i - 1).recvNanos) / 1_000_000.0;
         }
 
+        // Movement-packet count in the pop→last-burst window. A real client
+        // always emits at least one PLAYER_FLYING (rotation-only counts) per
+        // server tick the player exists. Zero in the window is the literal
+        // sub-tick automation signature — exposed via TotemCycle for the
+        // AutoTotem* family to consume.
+        int movementPackets = 0;
+        for (CapturedPacket p : s.log.recent(256)) {
+            if (p.recvNanos < popNs || p.recvNanos > lastNs) continue;
+            if (p.kind == PacketKind.MOVEMENT) movementPackets++;
+        }
+
         TotemCycle c = new TotemCycle(++inv.cycleSeq, cycleMs, selectToEquipMs,
-                gaps, burst.size(), interactedWhileOpen, inv.cyclePopNanos, lastNs);
+                gaps, burst.size(), interactedWhileOpen, inv.cyclePopNanos, lastNs,
+                movementPackets);
         inv.cycles.addLast(c);
         while (inv.cycles.size() > CYCLE_CAP) inv.cycles.removeFirst();
 
