@@ -8,6 +8,7 @@ import com.koalaguard.discord.DiscordBot;
 import com.koalaguard.engine.EngineManager;
 import com.koalaguard.engine.EngineTask;
 import com.koalaguard.engine.lag.TransactionDriver;
+import com.koalaguard.engine.netty.RawNettyInjector;
 import com.koalaguard.engine.packet.PacketCaptureListener;
 import com.koalaguard.engine.replay.ReplayManager;
 import com.koalaguard.listener.BukkitStateListener;
@@ -46,6 +47,7 @@ public final class KoalaGuard extends JavaPlugin {
     private SetbackManager setbackManager;
     private ReplayManager replayManager;
     private EngineManager engine;
+    private RawNettyInjector nettyInjector;
 
     @Override
     public void onLoad() {
@@ -80,6 +82,12 @@ public final class KoalaGuard extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(new PacketCaptureListener(this));
         PacketEvents.getAPI().init();
 
+        // Raw netty channel-handler injection sits BELOW PacketEvents for
+        // byte-level frame metrics (length distribution, packet-id histogram,
+        // outbound byte rate). Read-only; PacketEvents and Mojang both see
+        // every frame unchanged.
+        nettyInjector = new RawNettyInjector(this);
+
         // Lag-comp transaction clock, then the per-tick engine driver.
         new TransactionDriver(this).runTaskTimer(this, 1L, 1L);
         new EngineTask(this).runTaskTimer(this, 1L, 1L);
@@ -93,6 +101,7 @@ public final class KoalaGuard extends JavaPlugin {
         Bukkit.getOnlinePlayers().forEach(p -> {
             dataManager.create(p);
             replayManager.start(p);
+            nettyInjector.inject(p);
         });
 
         getLogger().info("KoalaGuard v" + getPluginMeta().getVersion()
@@ -102,6 +111,7 @@ public final class KoalaGuard extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (nettyInjector != null) nettyInjector.uninjectAll();
         if (violationManager != null) violationManager.shutdown();
         if (discordBot != null) discordBot.shutdown();
         if (dataManager != null) dataManager.clear();
@@ -121,4 +131,5 @@ public final class KoalaGuard extends JavaPlugin {
     public SetbackManager getSetbackManager()     { return setbackManager; }
     public ReplayManager getReplayManager()       { return replayManager; }
     public EngineManager getEngine()              { return engine; }
+    public RawNettyInjector getNettyInjector()    { return nettyInjector; }
 }
