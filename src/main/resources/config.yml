@@ -92,8 +92,11 @@ checks:
     min-streak: 6
     confirm-cooldown-ticks: 20
     # Frame-accurate cobweb/powder-snow/etc. exempt + residual-slowdown grace
-    # (fixes the FP when knocked into a web mid-fight).
-    special-block-grace-ticks: 25
+    # (fixes the FP when knocked into a web mid-fight). The exempt test now
+    # scans the player's full bounding-box footprint, so being pushed/walking
+    # INTO a web (box touching it before the feet centre does) is covered, and
+    # 40 ticks (2s) of grace covers the residual slowdown after leaving.
+    special-block-grace-ticks: 40
 
   phase:
     enabled: true
@@ -127,10 +130,19 @@ checks:
     punishment: kick
     ban-duration: 7d
     window-ticks: 60
-    max-ratio-excess: 0.18
+    # 0.25 (was 0.18): tolerate the transient ratio spike a post-micro-lag
+    # packet burst produces; a real fast-timer is a SUSTAINED 1.3-2.0x.
+    max-ratio-excess: 0.25
     score-scale: 40.0
     threshold: 10.0
-    min-streak: 2
+    # 4 (was 2): require the fast ratio to persist across multiple windows so
+    # a one-window burst never confirms.
+    min-streak: 4
+    # Timer-balance (fast-then-slow alternation) hardened against bursty-but-
+    # legal play: need ≥80% of frames in one bucket AND a fast average.
+    max-bucket-frac: 0.80
+    balance-min-ratio-excess: 0.12
+    balance-min-streak: 4
     # CRITICAL: only evaluate the ratio when there are enough MOVEMENT frames
     # in the window. s.tick (movement-tick counter) FREEZES while the player
     # is stationary (rotation-only packets create no PositionFrame), so a
@@ -435,45 +447,13 @@ checks:
   # Sample is in-combat moving frames only; alert-only.
   aimi:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, min-speed: 0.10, sample-cap: 60, min-samples: 36, max-mean-residual: 10.0, min-sd-residual: 0.0, score: 6.0, threshold: 11.0, min-streak: 4 }
 
-  # SpoofedRotation — catches silent-aim / silent-scaffold / auto-crystal /
-  # any cheat that overrides the packet rotation to perfectly track an action
-  # target (Meteor / LiquidBounce / Wurst / Sigma). Samples the angular error
-  # from packet-stamped rotation to the action's geometric target across
-  # attacks AND block-places; flags when BOTH mean AND SD collapse below
-  # human anatomical limits over 18+ actions.
-  #
-  # max-mean-deg/max-sd-deg are the human floor — vanilla aiming has 3-8°
-  # SD even on a perfect lock; sub-1° / sub-0.5° over 18 actions is forged.
-  # max-sample-deg drops obvious misses (the cheat always lands square so
-  # 12°-off samples are not its signature and would only inflate variance).
-  # Consecutive-perfect-actions trigger:
-  #   perfect-deg     — an action with err ≤ this is "perfect" (Meteor's
-  #                     forged angle hits ≈0°; humans never sub-0.5°)
-  #   tolerant-deg    — > this resets the streak (clearly human)
-  #                     between perfect and tolerant just decrements
-  #   perfect-streak  — N perfects in a row → flag
-  # Fires after ~5 attacks without any variance window / sample minimum.
-  spoofedrotation:
-    enabled: true
-    max-violations: 6
-    punishment: kick
-    ban-duration: permanent
-    perfect-deg: 0.50
-    tolerant-deg: 3.50
-    perfect-streak: 5
-    reflag-cooldown-ns: 2000000000
-    score: 9.0
-    threshold: 9.0
-    min-streak: 1
-    # Temporary diagnostic: prints one console line per sampled action with
-    # the measured angular error so you can see exactly what's happening
-    # without enabling global `debug: true`. Set false when you've confirmed
-    # the check is firing on real cheats.
-    log-samples: true
   # Crystal break rate + respawn-anchor cycle rate. Catches classic
   # CrystalAura plus AnchorAura / safe-anchor / Wurst's AnchorAura. The
   # silent-aim part of aura attacks lands on AimA-H independently.
-  crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 7, max-anchor-per-sec: 5, score-scale: 4.0, anchor-score-scale: 4.0, threshold: 9.0, min-streak: 3 }
+  # Headroom raised (per-sec 7→11, anchor 5→8, stacked 2→4, streak 3→5) so
+  # fast LEGIT crystal/anchor PvP never trips it — a real aura runs 15-25/s,
+  # well clear of these. The silent-aim part of aura attacks lands on AimA-I.
+  crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 11, max-anchor-per-sec: 8, max-stacked-place: 4, score-scale: 4.0, anchor-score-scale: 4.0, stacked-score-scale: 4.0, threshold: 9.0, min-streak: 5 }
   # Uses PRECISE simGround + a real-fall exclusion so legit jump/air crits
   # never flag — only a hop that never leaves the ground and never falls.
   # `cap-*` keys surface the HIGHEST-priority damage-event PREVENTION that
@@ -554,7 +534,9 @@ checks:
   # RELEASE_USE_ITEM and a same-tick Q-drop / F-swap isn't guaranteed — they
   # arrive bunched). A 200ms RELEASE-grace also skips tail-of-session actions
   # so a closing use never trips it.
-  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 3, use-stale-ms: 30000, use-fresh-ms: 4000, release-grace-ms: 200, score: 6.0, threshold: 9.0, min-streak: 2 }
+  # Hardened (actions 3→4, streak 2→3, release-grace 200→400ms, sneak-toggles
+  # 6→10) so bunched RELEASE_USE_ITEM + same-tick action packets never trip it.
+  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 4, use-stale-ms: 30000, use-fresh-ms: 4000, release-grace-ms: 400, max-sneak-toggles-in-use: 10, score: 6.0, threshold: 9.0, min-streak: 3 }
   # Inventory automation: AutoArmor / AutoTool / AutoMend (window-0 cluster
   # OR inv-click coincident with attack) AND ChestStealer / FastStealer /
   # AutoSteal (non-zero window-id burst — vanilla shift-click cap is 1/tick,
@@ -643,9 +625,15 @@ checks:
     punishment: kick
     ban-duration: 14d
     break-grace-ns: 250000000
+    # Skip the check while the placer is in / just left a cobweb (or other
+    # special movement block). Cobweb break→replace + web-clamped feet/MLG
+    # placements were the "airplace when cobwebs" FP source.
+    special-block-grace-ticks: 40
     score: 5.0
     threshold: 9.0
-    min-streak: 2
+    # Raised 2 → 3: a single air-clicked-face packet can come from a
+    # chunk-reload / falling-block race; a sustained run is conclusive.
+    min-streak: 3
 
   # AntiKnockback-Sprint — three gates ALL required to flag:
   #  S0 damage event must have produced a server-side knockback (skips
