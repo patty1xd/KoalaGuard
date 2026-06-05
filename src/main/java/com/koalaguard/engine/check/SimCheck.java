@@ -95,6 +95,28 @@ public abstract class SimCheck extends Check {
         return cfgI("confirm-cooldown-ticks", 20);
     }
 
+    /**
+     * Experimental-tier reporting: identical to {@link #diverge} but routes
+     * to a separate log channel and NEVER triggers punishment / setback /
+     * combat-cancel. For new check signals being tuned in production. Enable
+     * a check's experimental output via {@code checks.<name>.experimental=true};
+     * default off, so existing checks behave unchanged.
+     */
+    protected boolean experimental(CheckContext ctx, double amount, double threshold,
+                                   int minStreak, String detail) {
+        if (!ctx.plugin.getConfig().getBoolean("checks." + getName() + ".experimental", false)) {
+            return false;
+        }
+        ViolationScore vs = score(ctx);
+        vs.add(amount);
+        if (vs.consume(threshold, minStreak, ctx.tick, cooldownTicks())) {
+            plugin.getLogger().info("[" + getName() + "/EXP] " + ctx.player.getName()
+                    + " :: " + detail);
+            return true;
+        }
+        return false;
+    }
+
     public void cleanup(UUID uuid) {
         scores.remove(uuid);
     }

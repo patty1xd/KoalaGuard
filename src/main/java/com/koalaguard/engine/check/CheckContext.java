@@ -44,4 +44,18 @@ public final class CheckContext {
         if (data.lag.unstable()) return true;
         return plugin.getSafetyManager().shouldSuppressBasic(data, player);
     }
+
+    /** True if the attacker swung at an entity within {@code windowMs}. */
+    public boolean isInCombat(long windowMs) {
+        long atk = state.combat.lastAttackNanos;
+        if (atk <= Long.MIN_VALUE / 2) return false;
+        return (System.nanoTime() - atk) / 1_000_000L <= windowMs;
+    }
+
+    /** Millis since the most recent attack, or Long.MAX_VALUE if none. */
+    public long msSinceAttack() {
+        long atk = state.combat.lastAttackNanos;
+        if (atk <= Long.MIN_VALUE / 2) return Long.MAX_VALUE;
+        return Math.max(0, (System.nanoTime() - atk) / 1_000_000L);
+    }
 }
