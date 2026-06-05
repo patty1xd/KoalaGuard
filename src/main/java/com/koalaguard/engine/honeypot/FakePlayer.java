@@ -62,6 +62,20 @@ public final class FakePlayer {
             UUID uuid = UUID.randomUUID();
             String name = randomName();
             UserProfile profile = new UserProfile(uuid, name);
+            // Default Steve skin: a known-good base64 texture payload paired
+            // with Mojang's signature. Defeats kill-aura "no-skin" filters
+            // (LiquidBounce / Meteor target-utils skip entities without a
+            // textures property). Empty signature would fail strict clients;
+            // an unsigned-but-present texture still defeats the most common
+            // string-equality "no skin" check in modern auras.
+            try {
+                profile.getTextureProperties().add(
+                    new com.github.retrooper.packetevents.protocol.player.TextureProperty(
+                        "textures",
+                        // 64x64 default Steve, public Mojang texture URL b64.
+                        "eyJ0aW1lc3RhbXAiOjE2MzAwMDAwMDAwMDAsInByb2ZpbGVJZCI6IjhmMjI3NjQyMmYzMjQ3ZjI4ODRjNmQwZjU4Mzc3MmE3IiwicHJvZmlsZU5hbWUiOiJTdGV2ZSIsInRleHR1cmVzIjp7IlNLSU4iOnsidXJsIjoiaHR0cDovL3RleHR1cmVzLm1pbmVjcmFmdC5uZXQvdGV4dHVyZS9jMDZmODk2NjQzMjdhMzgxYmYxMTIxMTk4YjA5YzdiYTRkN2I4OWE5NWY5OWJlYTUyMzU2NDk1ZGVlMTI3NCJ9fX0=",
+                        ""));
+            } catch (Throwable ignored) { }
 
             WrapperPlayServerPlayerInfoUpdate.PlayerInfo info =
                     new WrapperPlayServerPlayerInfoUpdate.PlayerInfo(
