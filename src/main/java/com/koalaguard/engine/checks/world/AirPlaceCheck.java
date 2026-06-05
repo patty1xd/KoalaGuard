@@ -118,6 +118,30 @@ public final class AirPlaceCheck extends SimCheck {
                 // first line.
             }
         }
+        // AutoSurround: placement target block IS the player's own feet/legs
+        // box. Vanilla physics rejects this (you cannot place into the space
+        // you occupy), but a packet-only place that bypasses the client
+        // validator and forges a clicked face can. Catches obsidian/anchor
+        // self-surround in crystal-PvP cheats.
+        for (CapturedPacket p : chrono) {
+            if (p.kind != PacketKind.BLOCK_PLACE || !p.hasPos) continue;
+            if (p.seq > max) max = p.seq;
+            if (p.seq <= last) continue;
+            org.bukkit.Location l = ctx.player.getLocation();
+            double cx = (int) p.x + 0.5, cz = (int) p.z + 0.5;
+            double dx = cx - l.getX(), dz = cz - l.getZ();
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            int by2 = (int) p.y;
+            int feet = (int) Math.floor(l.getY());
+            boolean insideBody = dist < cfgD("self-radius", 0.35)
+                    && by2 >= feet && by2 <= feet + 1;
+            if (insideBody) {
+                diverge(ctx, cfgD("self-score", 6.0), cfgD("threshold", 9.0),
+                        cfgI("self-min-streak", 2),
+                        String.format("autoSurround: place @%d,%d,%d inside own body box",
+                                (int) p.x, by2, (int) p.z), false);
+            }
+        }
         seen.put(id, max);
     }
 

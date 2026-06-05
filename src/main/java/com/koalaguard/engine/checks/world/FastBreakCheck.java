@@ -81,10 +81,36 @@ public final class FastBreakCheck extends SimCheck {
                 pe.startNanos = pkt.recvNanos;
                 pe.bx = (int) pkt.x; pe.by = (int) pkt.y; pe.bz = (int) pkt.z;
                 pending.put(id, pe);
+            } else if ("ABORT_DESTROY_BLOCK".equals(pkt.strA)
+                    || "CANCELLED_DIGGING".equals(pkt.strA)
+                    || "STOP_DIGGING".equals(pkt.strA)) {
+                // ABORT/CANCEL fanout: server resets the dig state, then the
+                // cheat fires FINISHED for the same block immediately. Track
+                // the abort nanos so the FINISHED arm below can reject a
+                // finish that races within <60ms of the cancel.
+                Pending pe = pending.get(id);
+                if (pe != null && pe.bx == (int) pkt.x && pe.by == (int) pkt.y
+                        && pe.bz == (int) pkt.z) {
+                    pe.startNanos = -pkt.recvNanos;   // negative = post-abort sentinel
+                }
             } else if ("FINISHED_DIGGING".equals(pkt.strA)) {
                 Pending pe = pending.remove(id);
                 if (pe == null) continue;
                 if (pe.bx != (int) pkt.x || pe.by != (int) pkt.y || pe.bz != (int) pkt.z) continue;
+                // Post-abort race: a FINISH within 60ms of an ABORT/CANCEL is
+                // the literal speedmine fingerprint.
+                if (pe.startNanos < 0) {
+                    long abortNs = -pe.startNanos;
+                    long gapMs = (pkt.recvNanos - abortNs) / 1_000_000L;
+                    if (gapMs < cfgL("abort-finish-min-gap-ms", 60L)) {
+                        diverge(ctx, cfgD("abort-score", 7.0),
+                                cfgD("threshold", 9.0), cfgI("abort-min-streak", 1),
+                                String.format("FINISH %dms after ABORT_DESTROY_BLOCK (speedmine)",
+                                        gapMs), false);
+                        continue;
+                    }
+                    pe.startNanos = abortNs;
+                }
                 long elapsedMs = (pkt.recvNanos - pe.startNanos) / 1_000_000L;
                 if (elapsedMs <= 0) continue;
 

@@ -66,8 +66,36 @@ public final class NukerCheck extends SimCheck {
                     cfgD("threshold", 10.0), cfgI("min-streak", 2),
                     distinct + " distinct blocks broken in one tick ("
                             + packets + " digging packets)", false);
-        } else {
-            clean(ctx, 1.0);
+            return;
         }
+
+        // Tick-split nuker: 3+3+3 across ticks dodges the per-tick cap but
+        // a 1-second rolling distinct-coord count is way over any human
+        // mining rate. Cobblestone with Eff5+Haste2 sustained tops ~12/s;
+        // 20+ distinct in 1s is impossible by hand.
+        long secNs = cfgL("per-sec-window-ns", 1_000_000_000L);
+        java.util.HashSet<Long> perSec = new java.util.HashSet<>();
+        for (CapturedPacket p : recent) {
+            if (p.kind != PacketKind.DIGGING) continue;
+            if (!("START_DIGGING".equals(p.strA) || "FINISHED_DIGGING".equals(p.strA))) continue;
+            if (newest - p.recvNanos > secNs) continue;
+            if (p.hasPos) {
+                perSec.add(((long) (int) p.x << 40)
+                        ^ ((long) (int) p.y << 20)
+                        ^ ((long) (int) p.z));
+            }
+        }
+        // 30/sec floor: legit Eff5+Haste2 insta-mining of soft blocks can hit
+        // ~1 block/tick (~20/sec) tunneling; a tick-split nuker runs 3+/tick
+        // (60+/sec), so 30 cleanly separates them without FP on fast miners.
+        int secLimit = cfgI("max-per-sec", 30);
+        if (perSec.size() >= secLimit) {
+            diverge(ctx, (perSec.size() - secLimit + 1) * cfgD("per-sec-score-scale", 2.0),
+                    cfgD("threshold", 10.0), cfgI("per-sec-min-streak", 1),
+                    perSec.size() + " distinct blocks broken in last "
+                            + (secNs / 1_000_000L) + "ms (tick-split nuker)", false);
+            return;
+        }
+        clean(ctx, 1.0);
     }
 }

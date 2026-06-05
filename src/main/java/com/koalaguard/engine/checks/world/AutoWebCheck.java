@@ -174,6 +174,26 @@ public final class AutoWebCheck extends SimCheck {
             }
         }
 
+        // ─── S4 — burst-rate (CORROBORATING) ───
+        // ≥3 distinct cobweb placements within 1.5s during combat is
+        // physically beyond a human inventory drag-place rhythm.
+        if (bad > 0) {
+            long windowNs = cfgL("burst-window-ns", 1_500_000_000L);
+            long nowNs = System.nanoTime();
+            int recent = 0;
+            for (PlayerState.PlaceRecord r : ctx.state.recentPlaces(30)) {
+                if (r.material != Material.COBWEB) continue;
+                if (nowNs - r.nanos > windowNs) continue;
+                recent++;
+            }
+            int burst = cfgI("min-burst", 3);
+            if (recent >= burst) {
+                bad += (recent - burst + 1) * cfgD("burst-score-scale", 2.5);
+                why.append(String.format("burst %d webs/%dms ", recent,
+                        windowNs / 1_000_000L));
+            }
+        }
+
         if (bad > 0) {
             if (diverge(ctx, bad, cfgD("threshold", 10.0), cfgI("min-streak", 2),
                     "autoweb :: " + why.toString().trim(), false)) {

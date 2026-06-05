@@ -60,8 +60,30 @@ public final class MultiPlaceCheck extends SimCheck {
                     cfgD("threshold", 10.0), cfgI("min-streak", 2),
                     distinct + " distinct blocks placed within one tick ("
                             + packets + " packets)", false);
-        } else {
-            clean(ctx, 1.0);
+            return;
         }
+
+        // Tick-split bypass: places spread across 2-3 ticks (4+4 or 3+3+3)
+        // that each stay under the per-tick limit. Use a 2-tick (~140ms)
+        // window with a smaller cumulative threshold.
+        long longWindowNs = cfgL("long-window-ns", 200_000_000L);
+        int longLimit = cfgI("long-window-places", 7);
+        java.util.HashSet<Long> longCoords = new java.util.HashSet<>();
+        for (CapturedPacket p : recent) {
+            if (p.kind == PacketKind.BLOCK_PLACE && newest - p.recvNanos <= longWindowNs
+                    && p.hasPos) {
+                longCoords.add(((long) (int) p.x << 40)
+                             ^ ((long) (int) p.y << 20)
+                             ^ ((long) (int) p.z));
+            }
+        }
+        if (longCoords.size() >= longLimit) {
+            diverge(ctx, (longCoords.size() - longLimit + 1) * cfgD("long-score-scale", 3.0),
+                    cfgD("threshold", 10.0), cfgI("long-min-streak", 2),
+                    longCoords.size() + " distinct places in "
+                            + (longWindowNs / 1_000_000L) + "ms (tick-split burst)", false);
+            return;
+        }
+        clean(ctx, 1.0);
     }
 }

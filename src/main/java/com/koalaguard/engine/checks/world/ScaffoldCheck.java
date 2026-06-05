@@ -47,6 +47,10 @@ public final class ScaffoldCheck extends SimCheck {
         long lastPlaceTick = Long.MIN_VALUE;
         Float lastYaw = null, lastPitch = null;
         int identicalRotStreak;
+        // Eagle/Telly: ≥3 consecutive places with sub-2° rotation change.
+        // Less strict than the identical-rot streak; catches subtle jitter.
+        int subDegreeStreak;
+        Float subDegYaw = null, subDegPitch = null;
         final Deque<Long> intervals = new ArrayDeque<>();
         final Deque<Double> pitches = new ArrayDeque<>();
     }
@@ -202,6 +206,34 @@ public final class ScaffoldCheck extends SimCheck {
             s.lastPlaceTick = p.tickIndex;
             s.pitches.addLast((double) el[4]);
             while (s.pitches.size() > cfgI("sample-cap", 24)) s.pitches.removeFirst();
+
+            // Sub-degree rotation streak across places — Eagle/Telly cache
+            // rotation between blocks and only update micro-amounts. The
+            // strict identical-rot path above misses these (the cheat now
+            // randomises ±0.5°). A streak of <2° rotation across 4+ places
+            // is still inhuman because real scaffolding requires looking at
+            // each block's clicked face — even subtle camera shifts cross
+            // 2° easily.
+            float pYaw = p.hasRot ? p.yaw : (float) el[3];
+            float pPitch = p.hasRot ? p.pitch : (float) el[4];
+            if (s.subDegYaw != null && s.subDegPitch != null) {
+                double dy = Math.abs(MathUtil.wrapAngle(pYaw - s.subDegYaw));
+                double dp = Math.abs(pPitch - s.subDegPitch);
+                if (dy < cfgD("subdeg-max-deg", 2.0)
+                        && dp < cfgD("subdeg-max-deg", 2.0)) {
+                    s.subDegreeStreak++;
+                } else {
+                    s.subDegreeStreak = 0;
+                }
+            }
+            s.subDegYaw = pYaw;
+            s.subDegPitch = pPitch;
+            if (s.subDegreeStreak + 1 >= cfgI("subdeg-streak", 4)) {
+                bad += cfgD("subdeg-score", 4.0);
+                why.append(String.format("eagle/telly: %d places within %.1f° rotation ",
+                        s.subDegreeStreak + 1, cfgD("subdeg-max-deg", 2.0)));
+                s.subDegreeStreak = 0;
+            }
         }
         s.lastSeq = maxSeen;
 
