@@ -65,13 +65,27 @@ public final class VehicleFlyCheck extends SimCheck {
         }
 
         // Boats are the canonical target but any rideable that gains height
-        // out of water / not on a slope is suspect.
+        // out of water / not on a slope is suspect. Minecarts are checked too
+        // — minecart-stacking exploits push the player up incrementally even
+        // when each individual tick stays sub-threshold.
         boolean boat = v instanceof Boat;
-        if (!boat && !cfgB("any-vehicle", false)) {
-            // Default: only check boats — pigs/horses can legitimately climb
-            // stairs and are noisy. Enable any-vehicle for paranoid servers.
+        boolean minecart = v instanceof org.bukkit.entity.Minecart;
+        if (!boat && !minecart && !cfgB("any-vehicle", false)) {
+            // Default: only check boats + minecarts — pigs/horses can climb
+            // stairs legitimately. Enable any-vehicle for paranoid servers.
             s.lastY = Double.NaN; s.accUp = 0; s.upTicks = 0;
             return;
+        }
+        // Minecart-on-rails exemption: vanilla rails legitimately push a
+        // minecart up via ascending track. Only flag minecarts NOT on rails.
+        if (minecart) {
+            org.bukkit.Material below = v.getLocation().clone()
+                    .subtract(0, 0.2, 0).getBlock().getType();
+            String bn = below.name();
+            if (bn.endsWith("_RAIL") || bn.equals("RAIL")) {
+                s.lastY = Double.NaN; s.accUp = 0; s.upTicks = 0;
+                return;
+            }
         }
 
         // Vehicle situational exempts.

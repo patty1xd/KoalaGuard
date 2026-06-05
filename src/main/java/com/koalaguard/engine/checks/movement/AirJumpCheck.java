@@ -37,11 +37,33 @@ public final class AirJumpCheck extends SimCheck {
             return;
         }
         long now = System.currentTimeMillis();
-        if (now - ctx.data.lastVelocityMs < 1200 || now - ctx.data.lastDamageMs < 800
-                || now - ctx.data.slimeBounceMs < 1500 || now - ctx.data.lastSlimeOrBedMs < 1500
-                || now - ctx.data.bubbleColumnMs < 1200 || now - ctx.data.lastTeleportMs < 1500
-                || s.tick - s.lastSpecialBlockTick < 12) {
-            return;
+        // Non-velocity environment graces always apply (legit knockback-less
+        // vertical sources the simulator can't model cleanly).
+        boolean otherGrace = now - ctx.data.lastDamageMs < 800
+                || now - ctx.data.slimeBounceMs < 1500
+                || now - ctx.data.lastSlimeOrBedMs < 1500
+                || now - ctx.data.bubbleColumnMs < 1200
+                || now - ctx.data.lastTeleportMs < 1500
+                || s.tick - s.lastSpecialBlockTick < 12;
+        if (otherGrace) { return; }
+
+        // Velocity (knockback) grace, rate-limited to defeat forged-kb spam.
+        // The streak counts DISTINCT velocity events (a knockback float lasts
+        // ~1200ms ≈ 24 ticks but is ONE event), so a legitimate fight never
+        // escalates; only a client that keeps emitting NEW velocity packets
+        // to hold the exemption open does. After max-exempt distinct events
+        // with no clean gap, the velocity grace stops applying.
+        boolean velExempt = now - ctx.data.lastVelocityMs < 1200;
+        int maxExempt = cfgI("max-exempt-streak", 8);
+        if (velExempt) {
+            if (ctx.data.airJumpLastVelMs != ctx.data.lastVelocityMs) {
+                ctx.data.airJumpLastVelMs = ctx.data.lastVelocityMs;
+                ctx.data.airJumpVelExemptStreak++;
+            }
+            if (ctx.data.airJumpVelExemptStreak <= maxExempt) return;  // honor grace
+            // else: spam detected — fall through to detection.
+        } else {
+            ctx.data.airJumpVelExemptStreak = 0;
         }
 
         // Detection-restored: streak=1, impulse=0.36, airTicks=4 — but with a

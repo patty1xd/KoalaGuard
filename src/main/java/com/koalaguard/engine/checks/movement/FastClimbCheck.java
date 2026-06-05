@@ -48,12 +48,35 @@ public final class FastClimbCheck extends SimCheck {
             diverge(ctx, (f.dy - maxUp) * cfgD("score-scale", 30.0),
                     cfgD("threshold", 8.0), cfgI("min-streak", 4),
                     String.format("climb up dy=%.3f > %.2f", f.dy, maxUp), true);
+            return;
         } else if (-f.dy > maxDown) {
             diverge(ctx, (-f.dy - maxDown) * cfgD("score-scale", 30.0),
                     cfgD("threshold", 8.0), cfgI("min-streak", 4),
                     String.format("climb down dy=%.3f", f.dy), true);
-        } else {
-            clean(ctx, 2.0);
+            return;
         }
+
+        // Pulse-climb: cheats alternate fast (~0.25) and slow (~0.05) ticks
+        // so per-tick stays under the cap while the AVERAGE climb rate is
+        // ~0.15 (above vanilla 0.118). Sum dy over recent climb-ticks; flag
+        // when average exceeds vanilla cap by a clear margin.
+        double sum = 0;
+        int n = 0;
+        for (PositionFrame g : ctx.state.recentFrames(cfgI("avg-window", 10))) {
+            if (g.dy > 0) { sum += g.dy; n++; }
+        }
+        if (n >= cfgI("min-avg-frames", 8)) {
+            double avg = sum / n;
+            double vanillaCap = cfgD("vanilla-up-cap", 0.118);
+            double margin = cfgD("avg-margin", 0.02);
+            if (avg > vanillaCap + margin) {
+                diverge(ctx, (avg - vanillaCap) * cfgD("avg-score-scale", 25.0),
+                        cfgD("threshold", 8.0), cfgI("avg-min-streak", 3),
+                        String.format("pulse-climb: avg up dy=%.3f over %d ticks > %.3f",
+                                avg, n, vanillaCap), true);
+                return;
+            }
+        }
+        clean(ctx, 2.0);
     }
 }

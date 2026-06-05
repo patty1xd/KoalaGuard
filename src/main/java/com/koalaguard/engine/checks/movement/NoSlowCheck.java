@@ -60,16 +60,57 @@ public final class NoSlowCheck extends SimCheck {
         boolean inWeb = feet == Material.COBWEB
                      || legs == Material.COBWEB
                      || below == Material.COBWEB;
-        if (!inWeb) { clean(ctx, 1.0); return; }
+        boolean inPowder = feet == Material.POWDER_SNOW
+                     || legs == Material.POWDER_SNOW;
+        boolean inBerries = feet == Material.SWEET_BERRY_BUSH
+                     || legs == Material.SWEET_BERRY_BUSH;
+
+        // Leather boots let you walk on powder snow at NORMAL speed (vanilla
+        // mechanic) — without this exemption a legit leather-boots player
+        // sprinting across powder snow would false-flag. Disables only the
+        // powder-snow sub-check, not cobweb / berries.
+        if (inPowder) {
+            try {
+                org.bukkit.inventory.ItemStack boots = ctx.player.getInventory().getBoots();
+                if (boots != null && boots.getType() == Material.LEATHER_BOOTS) {
+                    inPowder = false;
+                }
+            } catch (Throwable ignored) { }
+        }
 
         double h = f.horizontalSpeed();
-        double max = cfgD("max-web-speed", 0.12);    // legit web ≈ 0.05
-        if (h > max) {
-            diverge(ctx, (h - max) * cfgD("score-scale", 50.0),
-                    cfgD("threshold", 9.0), cfgI("min-streak", 4),
-                    String.format("cobweb speed %.3f > %.2f", h, max), true);
-        } else {
-            clean(ctx, 1.5);
+
+        if (inWeb) {
+            double max = cfgD("max-web-speed", 0.12);    // legit web ≈ 0.05
+            if (h > max) {
+                diverge(ctx, (h - max) * cfgD("score-scale", 50.0),
+                        cfgD("threshold", 9.0), cfgI("min-streak", 4),
+                        String.format("cobweb speed %.3f > %.2f", h, max), true);
+                return;
+            }
         }
+        if (inPowder) {
+            // Powder snow: vanilla applies (0.9, 1.5, 0.9) velocity multiplier
+            // and you sink. Legit max horizontal ≈ 0.05; threshold liberal.
+            double max = cfgD("max-powder-speed", 0.10);
+            if (h > max) {
+                diverge(ctx, (h - max) * cfgD("powder-score-scale", 50.0),
+                        cfgD("threshold", 9.0), cfgI("powder-min-streak", 4),
+                        String.format("powder-snow speed %.3f > %.2f", h, max), true);
+                return;
+            }
+        }
+        if (inBerries) {
+            // Sweet berry bush: vanilla applies (0.8, 0.75, 0.8). Max ≈ 0.07.
+            double max = cfgD("max-berries-speed", 0.13);
+            if (h > max) {
+                diverge(ctx, (h - max) * cfgD("berries-score-scale", 40.0),
+                        cfgD("threshold", 9.0), cfgI("berries-min-streak", 5),
+                        String.format("sweet-berry speed %.3f > %.2f", h, max), true);
+                return;
+            }
+        }
+        if (!inWeb && !inPowder && !inBerries) { clean(ctx, 1.0); return; }
+        clean(ctx, 1.5);
     }
 }

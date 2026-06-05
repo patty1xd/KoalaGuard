@@ -57,7 +57,34 @@ public final class NoFallCheck extends SimCheck {
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 12.0),
                     cfgI("min-streak", 2),
                     String.format("onGround spoof after %.1f-block fall", acc), true);
-        } else if (acc > cfgD("min-fall", 3.2)
+        }
+        // Incremental walk-up reset: distributed micro-upward dy across
+        // many frames during a fall that would otherwise be damaging.
+        // Sum recent positive dy while airborne; if it's a substantial
+        // climb with no knockback / no near-bounce / no climbable, this
+        // is the disguised fall-distance reset.
+        else if (acc > cfgD("min-fall", 3.2)
+                && !supported
+                && !ctx.state.exGliding
+                && !ctx.state.exClimbing
+                && !nearBounceBlock(ctx)
+                && ctx.state.tick - ctx.state.combat.knockbackTick > 6) {
+            double sumUp = 0;
+            int n = 0;
+            for (var g : ctx.state.recentFrames(cfgI("walkup-scan", 24))) {
+                if (g.dy > 0.001 && g.dy < 0.05) { sumUp += g.dy; n++; }
+                else if (g.dy <= 0) break;
+            }
+            if (n >= cfgI("walkup-min-frames", 6)
+                    && sumUp > cfgD("walkup-min-sum", 0.5)) {
+                diverge(ctx, cfgD("walkup-score", 7.0), cfgD("threshold", 12.0),
+                        cfgI("walkup-min-streak", 1),
+                        String.format("walk-up reset: %.3f cumulative micro-Δy over %d frames during %.1f-block fall",
+                                sumUp, n, acc), true);
+                acc = 0;
+            }
+        }
+        if (acc > cfgD("min-fall", 3.2)
                 && f.dy > cfgD("teleport-up-dy", 0.50)
                 && !ctx.state.exGliding
                 && ctx.state.tick - ctx.state.combat.knockbackTick > 6

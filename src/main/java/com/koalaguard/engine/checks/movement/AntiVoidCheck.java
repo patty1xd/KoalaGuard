@@ -59,8 +59,28 @@ public final class AntiVoidCheck extends SimCheck {
                     cfgI("min-streak", 6),
                     String.format("void hover dy=%.3f airTicks=%d", f.dy, ctx.state.airTicks),
                     true);
-        } else {
-            clean(ctx, 1.0);
+            return;
         }
+
+        // Pulse / burst-descent variant: cheat alternates between real falls
+        // (-0.5+) and hover ticks (~0). Detect by tracking the fraction of
+        // recent air-ticks where |dy| is tiny — a real void fall produces
+        // monotonically growing |dy|, never returns to near-zero.
+        int hoverTicks = 0, recentN = 0;
+        for (PositionFrame g : ctx.state.recentFrames(20)) {
+            if (g.simGround) break;
+            recentN++;
+            if (g.dy > -0.10 && g.dy < 0.10) hoverTicks++;
+        }
+        if (recentN >= cfgI("pulse-min-airframes", 12)
+                && hoverTicks >= cfgI("pulse-min-hover-ticks", 4)) {
+            diverge(ctx, cfgD("pulse-score", 4.0), cfgD("threshold", 12.0),
+                    cfgI("pulse-min-streak", 4),
+                    String.format("void pulse-hover: %d hover ticks in %d airframes",
+                            hoverTicks, recentN),
+                    true);
+            return;
+        }
+        clean(ctx, 1.0);
     }
 }

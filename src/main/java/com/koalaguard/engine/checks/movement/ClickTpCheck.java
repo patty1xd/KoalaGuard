@@ -84,9 +84,33 @@ public final class ClickTpCheck extends SimCheck {
                     cfgI("min-streak", 1),
                     String.format("teleport dx=%.2f dy=%.2f dz=%.2f", f.dx, f.dy, f.dz),
                     true);
-        } else {
-            clean(ctx, 3.0);
+            return;
         }
+
+        // PATH D: gradual / distributed clicktp — single ticks stay sub-1.2
+        // but cumulative displacement across a short window (4 ticks ≈ 200ms)
+        // exceeds what any vanilla state allows. Net 4-tick horizontal sprint
+        // cap is ~1.2 blocks (0.28 * 4) plus knockback slack; >4.0 is far
+        // beyond. Only fires outside any kb/teleport grace (gated above).
+        int win = cfgI("window-ticks", 4);
+        double sumH = 0, sumV = 0;
+        int counted = 0;
+        for (PositionFrame g : s.recentFrames(win)) {
+            sumH += g.horizontalSpeed();
+            sumV += Math.abs(g.dy);
+            counted++;
+        }
+        double sumHCap = cfgD("max-window-h", 4.0);
+        double sumVCap = cfgD("max-window-v", 5.0);
+        if (counted >= win && (sumH > sumHCap || sumV > sumVCap)) {
+            diverge(ctx, cfgD("window-score", 12.0), cfgD("threshold", 10.0),
+                    cfgI("window-min-streak", 1),
+                    String.format("distributed clicktp: %d-tick sumH=%.2f sumV=%.2f",
+                            counted, sumH, sumV),
+                    true);
+            return;
+        }
+        clean(ctx, 3.0);
     }
 
     @Override

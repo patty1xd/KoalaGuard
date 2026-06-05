@@ -64,6 +64,27 @@ public final class JesusCheck extends SimCheck {
             return;
         }
 
+        // Ground-spoof Jesus: client claims onGround=true while standing on
+        // water with no real ground (simGround=false). Vanilla never sets
+        // onGround on a water column without a lily pad / ice / boat — those
+        // are already filtered. A streak of clientGround=true + simGround=
+        // false on liquid feet is the literal cheat fingerprint.
+        if (onLiquid && !lilypad && !frost
+                && f.clientGround && !f.simGround) {
+            int spoof = 0;
+            for (var g : ctx.state.recentFrames(cfgI("spoof-scan", 6))) {
+                if (g.clientGround && !g.simGround) spoof++;
+                else break;
+            }
+            if (spoof >= cfgI("min-spoof-ticks", 3)) {
+                diverge(ctx, cfgD("spoof-score", 5.0), cfgD("threshold", 12.0),
+                        cfgI("spoof-min-streak", 2),
+                        String.format("water ground-spoof on %s: %d consecutive ticks",
+                                feet, spoof), true);
+                return;
+            }
+        }
+
         // Dolphin / Bounce-Jesus: the cheat bounces ON the water surface
         // instead of holding y still — each tick alternates up/down so the
         // mean |dy| stays small but no single frame meets the flat threshold

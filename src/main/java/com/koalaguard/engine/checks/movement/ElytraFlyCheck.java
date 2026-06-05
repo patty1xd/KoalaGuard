@@ -47,6 +47,31 @@ public final class ElytraFlyCheck extends SimCheck {
                     < cfgL("rocket-window-ms", 3000L));
         if (rocket) { clean(ctx, 2.0); return; }
 
+        // Near-zero-FP: gliding state active but no elytra equipped in
+        // chestplate slot. Vanilla server gates FALL_FLYING on chest item
+        // presence; cheat clients that force the gliding flag client-side
+        // leak through this. Single confirmed tick is conclusive.
+        try {
+            org.bukkit.inventory.ItemStack chest = ctx.player.getInventory().getChestplate();
+            if (chest == null || chest.getType() != org.bukkit.Material.ELYTRA) {
+                // streak 2: avoid a 1-tick race where the gliding flag lingers
+                // for a tick after the elytra leaves the chest slot mid-swap.
+                diverge(ctx, cfgD("no-elytra-score", 14.0), cfgD("threshold", 12.0),
+                        cfgI("no-elytra-min-streak", 2),
+                        "gliding without elytra in chest slot", true);
+                return;
+            }
+            // Durability-zero elytra is also impossible to glide with
+            org.bukkit.inventory.meta.Damageable dmg = (org.bukkit.inventory.meta.Damageable) chest.getItemMeta();
+            if (dmg != null && chest.getType().getMaxDurability() > 0
+                    && chest.getType().getMaxDurability() - dmg.getDamage() <= 1) {
+                diverge(ctx, cfgD("broken-elytra-score", 12.0), cfgD("threshold", 12.0),
+                        cfgI("broken-elytra-min-streak", 2),
+                        "gliding with broken elytra (durability 0)", true);
+                return;
+            }
+        } catch (Throwable ignored) { }
+
         if (f.dy > cfgD("min-climb-dy", 0.15)) {
             diverge(ctx, cfgD("score", 3.0), cfgD("threshold", 12.0),
                     cfgI("min-streak", 25),

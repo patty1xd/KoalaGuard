@@ -23,6 +23,13 @@ public final class TimerCheck extends SimCheck {
     private static final class W {
         long baseConf = -1, baseTick;
         long accConf, accFrames;
+        // Per-bucket frame counters for timer-balance detection: split the
+        // window into N equal-sized confirmed-transaction buckets and check
+        // for burst concentration (a fast-then-slow alternation that averages
+        // to ratio ≈1 still exhibits one or two buckets carrying most frames).
+        final long[] bucketFrames = new long[6];
+        int bucketIdx;
+        long bucketBaseConf = -1;
     }
 
     private final Map<UUID, W> win = new ConcurrentHashMap<>();
@@ -48,6 +55,20 @@ public final class TimerCheck extends SimCheck {
 
         w.accConf += dConf;
         w.accFrames += dFrames;
+
+        // Bucket frames by confirmed-transaction span (each bucket = window/N
+        // confirmed ticks). Timer-balance cheats put all the fast-tick frames
+        // in one or two buckets and zero in the rest; the overall ratio looks
+        // fine but the distribution is skewed.
+        if (w.bucketBaseConf < 0) w.bucketBaseConf = conf;
+        int bucketsPerWindow = w.bucketFrames.length;
+        int bucketSpan = Math.max(1, cfgI("window-ticks", 60) / bucketsPerWindow);
+        while (conf - w.bucketBaseConf >= bucketSpan) {
+            w.bucketIdx = (w.bucketIdx + 1) % bucketsPerWindow;
+            w.bucketFrames[w.bucketIdx] = 0;
+            w.bucketBaseConf += bucketSpan;
+        }
+        w.bucketFrames[w.bucketIdx] += dFrames;
 
         int window = cfgI("window-ticks", 60);
         if (w.accConf < window) return;
@@ -81,7 +102,27 @@ public final class TimerCheck extends SimCheck {
             diverge(ctx, (ratio - 1.0) * cfgD("score-scale", 40.0),
                     cfgD("threshold", 10.0), cfgI("min-streak", 2),
                     String.format("tick ratio %.3f over %d server ticks (fast timer)", ratio, window), true);
-        } else {
+            return;
+        }
+
+        // Timer-balance: total ratio looks legal but the per-bucket
+        // distribution is wildly skewed. Compute the max-bucket fraction
+        // and flag if one bucket holds more than half of the window's
+        // frames AND the average pace is meaningfully fast.
+        long maxBucket = 0, totalBucket = 0;
+        for (long b : w.bucketFrames) { totalBucket += b; if (b > maxBucket) maxBucket = b; }
+        if (totalBucket > 0 && accFrames >= minMoveFrames) {
+            double maxFrac = (double) maxBucket / totalBucket;
+            if (maxFrac > cfgD("max-bucket-frac", 0.55)
+                    && ratio > 1.0 + cfgD("balance-min-ratio-excess", 0.05)) {
+                diverge(ctx, cfgD("balance-score", 5.0),
+                        cfgD("threshold", 10.0), cfgI("balance-min-streak", 2),
+                        String.format("timer-balance: peak bucket %.0f%% of frames, ratio %.3f",
+                                maxFrac * 100, ratio), true);
+                return;
+            }
+        }
+        {
             // Slow-timer detection is deliberately NOT done here — movement-
             // tick-count vs confirmed-transactions intrinsically goes below
             // 1.0 for any player whose FPS is below the server rate, for

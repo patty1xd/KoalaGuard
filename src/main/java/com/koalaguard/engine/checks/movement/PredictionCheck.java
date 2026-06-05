@@ -104,7 +104,15 @@ public final class PredictionCheck extends SimCheck {
     private boolean verticalUnsafe(CheckContext ctx) {
         long now = System.currentTimeMillis();
         var d = ctx.data;
-        return now - d.lastVelocityMs   < 1200
+        // Riptide pre-water-tick: the tick BEFORE riptide-water-launch produces
+        // an envelope-busting impulse the simulator misses. Add a small lead
+        // window before the riptide event itself by checking the riptide flag
+        // history (lastRiptideMs is set at riptide trigger, the impulse can
+        // arrive 1 tick prior on the client).
+        boolean riptideLead = d.lastRiptideMs > 0
+                && (now - d.lastRiptideMs < 1700);
+        return riptideLead
+            || now - d.lastVelocityMs   < 1200
             || now - d.lastDamageMs     < 800
             || now - d.slimeBounceMs    < 1500
             || now - d.bubbleColumnMs   < 1200
