@@ -80,9 +80,15 @@ public final class CrystalAuraCheck extends SimCheck {
             }
         }
 
-        int maxCrystal = cfgI("max-per-sec", 7);
-        int maxAnchor = cfgI("max-anchor-per-sec", 5);
-        int maxStacked = cfgI("max-stacked-place", 2);
+        // Headroom raised so skilled manual crystal PvP never trips it: a fast
+        // legit player on good ping bursts ~6-8 crystal breaks/s; a real
+        // CrystalAura runs 15-25/s, so 11 cleanly separates them. Anchor 5→8
+        // for the same reason. Stacked-obsidian 2→4 because a legit
+        // mainhand+offhand double-place (or a place/break/replace retry) lands
+        // two packets on the same coord and was the FP source.
+        int maxCrystal = cfgI("max-per-sec", 11);
+        int maxAnchor = cfgI("max-anchor-per-sec", 8);
+        int maxStacked = cfgI("max-stacked-place", 4);
         boolean badCrystal = crystals >= maxCrystal;
         boolean badAnchor = anchorOps >= maxAnchor;
         boolean badStacked = stackedObsidian >= maxStacked;
@@ -91,7 +97,7 @@ public final class CrystalAuraCheck extends SimCheck {
             double bad = Math.max(0, crystals - maxCrystal + 1) * cfgD("score-scale", 4.0)
                        + Math.max(0, anchorOps - maxAnchor + 1) * cfgD("anchor-score-scale", 4.0)
                        + Math.max(0, stackedObsidian - maxStacked + 1) * cfgD("stacked-score-scale", 4.0);
-            diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 3),
+            diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 5),
                     String.format("crystal/s=%d anchor-ops/s=%d stacked-place=%d",
                             crystals, anchorOps, stackedObsidian), false);
         } else if (crystals > 0 || anchorOps > 0) {
