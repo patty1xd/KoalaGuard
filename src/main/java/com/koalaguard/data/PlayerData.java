@@ -110,6 +110,21 @@ public final class PlayerData {
      *  undo the rubber-band before Mojang's processor sees them. */
     public volatile long movementCancelUntilMs;
 
+    /** Consecutive DISTINCT velocity events that granted AirJump exemption.
+     *  Counts unique knockback events (not ticks) so a single legitimate
+     *  knockback float never escalates; only a client spamming forged
+     *  velocity packets to keep the exemption alive does. */
+    public volatile int airJumpVelExemptStreak;
+    /** The lastVelocityMs value the AirJump streak last counted, so each
+     *  knockback event is counted exactly once. */
+    public volatile long airJumpLastVelMs;
+
+    /** Raw netty-thread byte / packet-id stats, populated by the
+     *  {@link com.koalaguard.engine.netty.RawPacketSniffer} channel handler.
+     *  Null until the sniffer attaches (the handler instantiates on first
+     *  use, so the field stays null for sessions before injection runs). */
+    public volatile com.koalaguard.engine.netty.RawPacketStats rawStats;
+
     private volatile boolean alive = true;
     public boolean isAlive() { return alive; }
     public void invalidate() { alive = false; }
