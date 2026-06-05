@@ -18,7 +18,6 @@ import com.koalaguard.engine.checks.combat.HoneypotCheck;
 import com.koalaguard.engine.checks.combat.MaceCheck;
 import com.koalaguard.engine.checks.combat.MacroCheck;
 import com.koalaguard.engine.checks.combat.ShieldBypassCheck;
-import com.koalaguard.engine.checks.combat.SpoofedRotationCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
@@ -126,12 +125,6 @@ public final class EngineManager {
         add(new MacroCheck(plugin));
         add(new AntiKBSprintCheck(plugin));
         add(new BowAimbotCheck(plugin));
-        // Unified silent-rotation detector — catches Meteor / LiquidBounce /
-        // Wurst / Sigma silent-aim + silent-scaffold + auto-crystal/anchor /
-        // any cheat that forges packet rotation to perfectly track an action
-        // target. Geometric checks (AimA-D / ScaffoldCheck S0 / Honeypot
-        // look-gate) cannot catch these by construction.
-        add(new SpoofedRotationCheck(plugin));
 
         // ── Inventory: interaction-chain state machines ──
         add(new InventoryChainCheck(plugin));
