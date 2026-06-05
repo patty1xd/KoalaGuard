@@ -14,6 +14,10 @@ public final class ViolationScore {
     private double score;
     private int badStreak;
     private int cleanStreak;
+    /** Highest score this player has ever reached for this check — surfaced
+     *  in /kg debug and useful for tuning thresholds without a flood of
+     *  confirm events. Set inside add(). */
+    private double peakScore;
     // NOT Long.MIN_VALUE: `tick - lastConfirmTick` would overflow to a huge
     // negative on the first check and the cooldown gate would never pass, so
     // no violation could ever confirm. A large negative sentinel keeps the
@@ -24,6 +28,7 @@ public final class ViolationScore {
     /** Raise the score; returns the new value. */
     public double add(double amount) {
         score = Math.min(100.0, score + amount);
+        if (score > peakScore) peakScore = score;
         badStreak++;
         cleanStreak = 0;
         return score;
@@ -71,4 +76,5 @@ public final class ViolationScore {
 
     public double score()      { return score; }
     public int badStreak()     { return badStreak; }
+    public double peakScore()  { return peakScore; }
 }
