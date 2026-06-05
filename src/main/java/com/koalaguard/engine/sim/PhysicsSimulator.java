@@ -78,6 +78,15 @@ public final class PhysicsSimulator {
         // diagonal-strafe + sub-tick aliasing slack (kept tight, FP-safe).
         r.maxHorizontal = predicted * 1.06 + 0.05;
 
+        // Min plausible horizontal: friction alone can't drop velocity faster
+        // than friction*lastH; if input was released this tick. Below 0.005
+        // momentum is cancelled by Mojang's epsilon. Used for slow-fly /
+        // stop-cheat detection — actualH < minHorizontal means the player
+        // teleport-snapped to zero motion the simulator's friction wouldn't.
+        double frictionFloor = lastH * friction;
+        if (frictionFloor < 0.005) frictionFloor = 0;
+        r.minHorizontal = frictionFloor * 0.94 - 0.005;
+
         // ── vertical envelope ──
         double gravity = player.hasPotionEffect(PotionEffectType.SLOW_FALLING) ? 0.01 : 0.08;
         if (player.hasPotionEffect(PotionEffectType.LEVITATION)) {

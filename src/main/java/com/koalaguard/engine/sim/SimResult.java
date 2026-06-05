@@ -10,6 +10,15 @@ public final class SimResult {
     /** Largest horizontal distance vanilla physics permits this tick. */
     public double maxHorizontal;
 
+    /**
+     * Smallest horizontal distance vanilla physics produces this tick, GIVEN
+     * the previous-tick speed and current friction state. Detects slow-fly
+     * and sneak-cheat exploits that reduce horizontal speed below natural
+     * deceleration. Set by the simulator; PredictionCheck enforces
+     * {@code actualH >= minHorizontal - epsilon} when reliable.
+     */
+    public double minHorizontal;
+
     /** Predicted vertical delta and the legal band around it. */
     public double expectedDy;
     public double dyLow;
