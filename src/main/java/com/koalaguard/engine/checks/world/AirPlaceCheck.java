@@ -50,6 +50,24 @@ public final class AirPlaceCheck extends SimCheck {
     @Override
     public void onTick(CheckContext ctx) {
         if (ctx.unstableBasic()) return;
+
+        // Cobweb / special-block grace. Placing AND breaking blocks while
+        // standing in (or having just left) a cobweb produces clicked-face
+        // races the air-test can't disambiguate: the web slows the player so a
+        // break→replace spans more ticks than the break-grace window, MLG/feet
+        // placements while web-clamped land inside the autoSurround body box,
+        // and a cobweb that gets broken between the packet and the main-thread
+        // world read leaves AIR at the clicked coords. All of these read as
+        // "air-place" though they're legitimate. Skipping the check while the
+        // placer is in/just-left a special movement block removes the user-
+        // reported "airplace when cobwebs" FP. (A genuine air-placer is still
+        // caught the instant they leave the web — the grace is short.)
+        if (ctx.state.exWeb
+                || ctx.state.tick - ctx.state.lastSpecialBlockTick
+                   < cfgI("special-block-grace-ticks", 40)) {
+            return;
+        }
+
         UUID id = ctx.data.getUuid();
         long last = seen.getOrDefault(id, Long.MIN_VALUE);
         long max = last;
