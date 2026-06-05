@@ -70,11 +70,7 @@ public final class LocationUtil {
      */
     public static boolean inSpecialMovementBlock(Player player) {
         Location l = player.getLocation();
-        for (double oy : new double[]{0.0, 0.9, 1.7}) {
-            if (isSpecialMovementBlock(
-                    l.clone().add(0, oy, 0).getBlock().getType())) return true;
-        }
-        return false;
+        return inSpecialMovementBlockAt(l.getWorld(), l.getX(), l.getY(), l.getZ());
     }
 
     public static boolean isSpecialMovementBlock(Material m) {
@@ -99,10 +95,25 @@ public final class LocationUtil {
     public static boolean inSpecialMovementBlockAt(org.bukkit.World w,
                                                    double x, double y, double z) {
         if (w == null) return false;
-        int bx = (int) Math.floor(x), bz = (int) Math.floor(z);
-        for (double oy : new double[]{0.0, 0.9, 1.7}) {
-            if (isSpecialMovementBlock(
-                    w.getBlockAt(bx, (int) Math.floor(y + oy), bz).getType())) return true;
+        // Scan the player's full bounding-box FOOTPRINT (±0.3 horizontally, the
+        // same half-width the ground check uses), not just the centre column.
+        // Cobweb / powder-snow slow the player whenever their AABB INTERSECTS
+        // the block — including a web in the adjacent cell the centre column
+        // never touches. Testing only (x,z) missed exactly that case, so the
+        // first tick a player was pushed/walked into a web (box touching it but
+        // feet centre still in air) PredictionCheck saw clamped motion with no
+        // exemption and false-flagged. The footprint + extended vertical span
+        // (just below feet to above head) closes the entry/edge gap.
+        double[] off = {-0.3, 0.0, 0.3};
+        for (double ox : off) {
+            for (double oz : off) {
+                int bx = (int) Math.floor(x + ox), bz = (int) Math.floor(z + oz);
+                for (double oy : new double[]{-0.1, 0.0, 0.9, 1.7}) {
+                    if (isSpecialMovementBlock(
+                            w.getBlockAt(bx, (int) Math.floor(y + oy), bz).getType()))
+                        return true;
+                }
+            }
         }
         return false;
     }
