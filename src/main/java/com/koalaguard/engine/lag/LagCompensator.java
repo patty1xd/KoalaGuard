@@ -72,4 +72,40 @@ public final class LagCompensator {
         return samples.size() >= 6
                 && (smoothed() >= 400 || jitter() >= 180);
     }
+
+    // ── Per-PONG retransmit tracking (de-dup duplicate IDs) ──
+    private long lastPongId = -1;
+    private long lastPongNanos;
+    private boolean retransmitFlag;
+
+    /**
+     * Called by the netty listener for each received PONG id. If the same id
+     * arrives twice within a short window the second is a TCP retransmit, not
+     * genuine network jitter — checks can use {@link #wasRetransmit()} to
+     * skip suppressing on that sample.
+     */
+    public synchronized void onPongId(long id) {
+        long now = System.nanoTime();
+        retransmitFlag = (id == lastPongId)
+                && (now - lastPongNanos) / 1_000_000L < 200L;
+        lastPongId = id;
+        lastPongNanos = now;
+    }
+
+    public synchronized boolean wasRetransmit() {
+        return retransmitFlag;
+    }
+
+    /**
+     * Per-check adaptive jitter cap. Lighter than {@link #unstable()} —
+     * lets a single noisy check (e.g. rotation) reject its tick while
+     * keeping the rest of the engine evaluating. Returns a recommended
+     * tolerance bump in ms based on current jitter above a per-check
+     * baseline.
+     */
+    public synchronized int adaptiveSlackMs(int baselineMs) {
+        double j = jitter();
+        if (j <= baselineMs) return 0;
+        return (int) Math.min(150, j - baselineMs);
+    }
 }
