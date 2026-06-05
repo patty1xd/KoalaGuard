@@ -77,11 +77,19 @@ public final class SetbackManager {
             // Drop the inbound packet pipeline for a short window so any
             // already-queued cheat packets the netty layer holds (blink burst,
             // post-clip frame, backstab return) are discarded instead of
-            // immediately undoing the teleport.
-            d.movementCancelUntilMs = System.currentTimeMillis()
-                    + plugin.getConfig().getLong("enforcement.movement-cancel-ms", 350L);
+            // immediately undoing the teleport. Escalate the window with
+            // setbackStreak so repeat offenders pay progressively longer
+            // cancel windows (caps at +400ms over the base).
+            long base = plugin.getConfig().getLong("enforcement.movement-cancel-ms", 350L);
+            int streakBump = Math.min(d.setbackStreak, 4) * 100;
+            d.movementCancelUntilMs = System.currentTimeMillis() + base + streakBump;
             d.combatCancelUntilMs = Math.max(d.combatCancelUntilMs,
                     d.movementCancelUntilMs);
+            // Also zero pendingVelocity Y so a stacked aerial knockback does
+            // not carry over the rubber-band as upward motion.
+            if (d.pendingVelocity != null) {
+                d.pendingVelocity.setX(0); d.pendingVelocity.setY(0); d.pendingVelocity.setZ(0);
+            }
             Location safe = target.clone();
             safe.setYaw(p.getLocation().getYaw());
             safe.setPitch(p.getLocation().getPitch());
