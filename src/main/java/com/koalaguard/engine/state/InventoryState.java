@@ -94,4 +94,12 @@ public final class InventoryState {
     public int lastClickSlot = Integer.MIN_VALUE;
     public int lastClickWindow = Integer.MIN_VALUE;
     public long lastClickNanos = Long.MIN_VALUE;
+
+    // Cursor-drag tracking — chest-stealer detection. A human drag takes
+    // 80-120ms per slot crossed; a stealer fires the whole drag sequence
+    // inside a single tick. lastCursorDragStartNanos is set when a START
+    // drag packet arrives; cursorDragSlotSequence counts slots touched.
+    public long lastCursorDragStartNanos = Long.MIN_VALUE;
+    public int  cursorDragSlotSequence;
+    public int  cursorDragMaxSpan;          // largest distance between touched slots
 }

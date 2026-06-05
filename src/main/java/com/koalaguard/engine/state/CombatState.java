@@ -70,4 +70,10 @@ public final class CombatState {
     public volatile long   lastFakeCritNanos = Long.MIN_VALUE / 2;
     public volatile int    lastFakeCritCount;
     public volatile String lastFakeCritDetail = "";
+
+    // ── Vehicle dismount wall-clock. Set by BukkitStateListener on
+    //    VehicleExitEvent. Used by CriticalsCheck to detect dismount-crit
+    //    exploits where the server fall distance is reset by dismount but the
+    //    cheat fires a crit inside the grace window.
+    public volatile long   lastVehicleExitMs = 0L;
 }

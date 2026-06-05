@@ -64,19 +64,42 @@ public final class TargetTracker {
     public double[] boxAt(int entityId, long nanos) {
         Deque<double[]> q = hist.get(entityId);
         if (q == null || q.isEmpty()) return null;
-        double[] best = null;
-        long bestStamp = Long.MIN_VALUE;
-        // Iterate oldest→newest; keep the latest snapshot with stamp ≤ nanos.
+        double[] before = null, after = null;
+        long beforeStamp = Long.MIN_VALUE, afterStamp = Long.MAX_VALUE;
         for (double[] snap : q) {
             long stamp = (long) snap[0];
-            if (stamp <= nanos && stamp > bestStamp) {
-                bestStamp = stamp;
-                best = snap;
+            if (stamp <= nanos && stamp > beforeStamp) {
+                beforeStamp = stamp;
+                before = snap;
+            } else if (stamp > nanos && stamp < afterStamp) {
+                afterStamp = stamp;
+                after = snap;
             }
         }
-        if (best == null) best = q.peekFirst();   // entity newer than the attack
-        if (best == null) return null;
-        return new double[]{ best[1], best[2], best[3], best[4], best[5], best[6] };
+        if (before == null) before = q.peekFirst();   // entity newer than the attack
+        if (before == null) return null;
+
+        // Sub-tick lerp between bracketing snapshots when both exist. The
+        // server snapshots at start-of-tick, so an attack arriving 25ms into
+        // a tick sits halfway between two snapshots. The nearest-before alone
+        // can be a full 50ms (≈0.2 blocks on a sprinting victim) stale; lerp
+        // brings the rewound AABB exactly to the attack instant, tightening
+        // ReachCheck/AimE/HitValidation without any FP risk.
+        if (after != null && afterStamp > beforeStamp) {
+            double alpha = (double) (nanos - beforeStamp)
+                    / (double) (afterStamp - beforeStamp);
+            if (alpha < 0) alpha = 0;
+            else if (alpha > 1) alpha = 1;
+            return new double[]{
+                    before[1] + (after[1] - before[1]) * alpha,
+                    before[2] + (after[2] - before[2]) * alpha,
+                    before[3] + (after[3] - before[3]) * alpha,
+                    before[4] + (after[4] - before[4]) * alpha,
+                    before[5] + (after[5] - before[5]) * alpha,
+                    before[6] + (after[6] - before[6]) * alpha,
+            };
+        }
+        return new double[]{ before[1], before[2], before[3], before[4], before[5], before[6] };
     }
 
     /** Raw snapshots for an entity, oldest→newest (copies): [nanos,minX,minY,minZ,maxX,maxY,maxZ]. */

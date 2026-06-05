@@ -34,9 +34,24 @@ public final class TotemCycle {
     public final long popNanos;
     public final long reequipNanos;
 
+    /**
+     * Movement packets observed between the pop and the re-equip. Zero is the
+     * sub-tick automation tell — a real player presses keys between events
+     * which produces at least one movement packet even when standing still
+     * (rotation-only PLAYER_FLYING). Filled by TotemCycleProcessor.
+     */
+    public final int movementPacketsBetween;
+
     public TotemCycle(long seq, double cycleMs, double selectToEquipMs,
                       double[] gapsMs, int burstSize, boolean interactedWhileOpen,
                       long popNanos, long reequipNanos) {
+        this(seq, cycleMs, selectToEquipMs, gapsMs, burstSize,
+                interactedWhileOpen, popNanos, reequipNanos, 0);
+    }
+
+    public TotemCycle(long seq, double cycleMs, double selectToEquipMs,
+                      double[] gapsMs, int burstSize, boolean interactedWhileOpen,
+                      long popNanos, long reequipNanos, int movementPacketsBetween) {
         this.seq = seq;
         this.cycleMs = cycleMs;
         this.selectToEquipMs = selectToEquipMs;
@@ -45,5 +60,6 @@ public final class TotemCycle {
         this.interactedWhileOpen = interactedWhileOpen;
         this.popNanos = popNanos;
         this.reequipNanos = reequipNanos;
+        this.movementPacketsBetween = movementPacketsBetween;
     }
 }

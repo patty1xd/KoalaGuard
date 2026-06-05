@@ -51,6 +51,8 @@ public final class PlayerState {
     public int airTicks, groundTicks, sinceGroundTicks;
     /** Movement frames replayed in the current server tick (Blink burst). */
     public int framesThisTick;
+    /** Rolling per-tick frame-count ring for pulse-blink detection. */
+    public int[] blinkPulse;
 
     // ── rotation history (true client aim) — large enough for GCD / entropy
     //    analysis over a 200+ sample combat window ──
@@ -141,6 +143,21 @@ public final class PlayerState {
             idx = (idx - 1 + FRAME_CAP) % FRAME_CAP;
         }
         return current;
+    }
+
+    /** Oldest frame whose tick is > the given tick (for split-tick scoot detection). */
+    public PositionFrame frameAfter(long t) {
+        // Walk newest→oldest, track the closest frame with tick > t.
+        int idx = (frameHead - 1 + FRAME_CAP) % FRAME_CAP;
+        PositionFrame best = null;
+        for (int i = 0; i < frameCount; i++) {
+            PositionFrame f = frames[idx];
+            if (f != null && f.tick > t) {
+                if (best == null || f.tick < best.tick) best = f;
+            }
+            idx = (idx - 1 + FRAME_CAP) % FRAME_CAP;
+        }
+        return best;
     }
 
     public List<PositionFrame> recentFrames(int max) {
