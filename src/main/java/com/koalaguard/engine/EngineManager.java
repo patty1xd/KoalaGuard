@@ -18,6 +18,7 @@ import com.koalaguard.engine.checks.combat.HoneypotCheck;
 import com.koalaguard.engine.checks.combat.MaceCheck;
 import com.koalaguard.engine.checks.combat.MacroCheck;
 import com.koalaguard.engine.checks.combat.ShieldBypassCheck;
+import com.koalaguard.engine.checks.combat.SpoofedRotationCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
