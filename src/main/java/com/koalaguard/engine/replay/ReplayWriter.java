@@ -108,6 +108,14 @@ public final class ReplayWriter {
             case HEALTH, HURT -> {
                 o.writeFloat(f.yaw); o.writeFloat(f.pitch);
             }
+            case FLAG -> {
+                o.writeInt(f.intA);                 // check ord / id
+                o.writeInt(f.intB);                 // score (×100 fixed-point)
+                o.writeByte(f.byteA);               // severity (0-255)
+                o.writeFloat(f.yaw);                // health snapshot
+                o.writeFloat(f.pitch);              // food snapshot
+                o.writeDouble(f.x); o.writeDouble(f.y); o.writeDouble(f.z);
+            }
             case SNEAK_START, SNEAK_STOP, SPRINT_START, SPRINT_STOP,
                  USE_ITEM, INV_CLOSE, DEATH -> { /* no payload */ }
         }

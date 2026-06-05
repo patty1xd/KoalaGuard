@@ -22,7 +22,8 @@ public enum ReplayKind {
     INV_CLOSE,
     HURT,           // damage taken — yaw carries amount (HP)
     DEATH,
-    HEALTH;         // yaw=health, pitch=food (compact reuse)
+    HEALTH,         // yaw=health, pitch=food (compact reuse)
+    FLAG;           // anticheat violation confirm — intA=check ord, byteA=severity
 
     private static final ReplayKind[] VALS = values();
     public static ReplayKind of(int ordinal) {

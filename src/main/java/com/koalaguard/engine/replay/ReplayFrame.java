@@ -17,6 +17,11 @@ public final class ReplayFrame {
     public int intA = -1, intB = -1;
     public byte byteA;
 
+    /** Monotonic frame id assigned by the buffer at push time. Optional in
+     *  serialised form (version-bumped writers can persist it; v1 ignores).
+     *  Used to link a violation event to the exact replay frame at flag-time. */
+    public long seqId;
+
     public ReplayFrame(long timeNanos, ReplayKind kind) {
         this.timeNanos = timeNanos;
         this.kind = kind;

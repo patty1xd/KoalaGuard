@@ -31,8 +31,13 @@ public final class ReplayReader {
                 throw new IOException("Not a KoalaGuard replay (bad magic): " + in.getName());
             }
             int version = i.readByte() & 0xFF;
-            if (version != ReplayWriter.VERSION) {
-                throw new IOException("Unsupported replay version " + version);
+            // Forward-compat: same-major versions read with v1 payload schema
+            // and tolerate unknown trailing fields per frame (writer must keep
+            // appending fields, never reorder/remove). Hard fail only on a
+            // major-version jump that we know breaks the wire shape.
+            if (version > ReplayWriter.VERSION + 1) {
+                throw new IOException("Unsupported replay version " + version
+                        + " (reader supports up to " + (ReplayWriter.VERSION + 1) + ")");
             }
             long hi = i.readLong(), lo = i.readLong();
             UUID uuid = new UUID(hi, lo);
@@ -88,6 +93,14 @@ public final class ReplayReader {
             }
             case HEALTH, HURT -> {
                 f.yaw = i.readFloat(); f.pitch = i.readFloat();
+            }
+            case FLAG -> {
+                f.intA = i.readInt();
+                f.intB = i.readInt();
+                f.byteA = i.readByte();
+                f.yaw = i.readFloat();
+                f.pitch = i.readFloat();
+                f.x = i.readDouble(); f.y = i.readDouble(); f.z = i.readDouble();
             }
             case SNEAK_START, SNEAK_STOP, SPRINT_START, SPRINT_STOP,
                  USE_ITEM, INV_CLOSE, DEATH -> { /* no payload */ }

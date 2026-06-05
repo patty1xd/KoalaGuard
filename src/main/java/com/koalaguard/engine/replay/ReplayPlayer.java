@@ -63,6 +63,9 @@ public final class ReplayPlayer {
     private long startMs;
     private int idx;
     private boolean running;
+    private float speed = 1.0f;
+    private boolean paused;
+    private long pausedAtMs;
 
     public ReplayPlayer(KoalaGuard plugin, Player viewer, String label, List<ReplayFrame> frames) {
         this.plugin = plugin;
@@ -77,6 +80,24 @@ public final class ReplayPlayer {
 
     public boolean isRunning() { return running; }
     public Player getViewer() { return viewer; }
+
+    /** Playback speed multiplier, clamped 0.1×–8×. Default 1.0. */
+    public void setSpeed(float v) {
+        this.speed = Math.max(0.1f, Math.min(8.0f, v));
+    }
+    public float getSpeed() { return speed; }
+
+    public void pause() {
+        if (paused || !running) return;
+        paused = true;
+        pausedAtMs = System.currentTimeMillis();
+    }
+    public void resume() {
+        if (!paused) return;
+        startMs += System.currentTimeMillis() - pausedAtMs;
+        paused = false;
+    }
+    public boolean isPaused() { return paused; }
 
     public void start() {
         if (running || frames == null || frames.isEmpty()) return;
@@ -121,7 +142,9 @@ public final class ReplayPlayer {
 
     private void tick() {
         if (!viewer.isOnline()) { stop(); return; }
-        long elapsed = System.currentTimeMillis() - startMs;
+        if (paused) return;
+        long rawElapsed = System.currentTimeMillis() - startMs;
+        long elapsed = (long) (rawElapsed * speed);
         while (idx < frames.size()) {
             ReplayFrame f = frames.get(idx);
             long fmS = f.timeNanos / 1_000_000L;

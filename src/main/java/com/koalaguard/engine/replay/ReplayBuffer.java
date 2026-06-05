@@ -39,6 +39,24 @@ public final class ReplayBuffer {
         return new ArrayList<>(frames);
     }
 
+    /**
+     * Read-only view of the last {@code count} frames, chronological. Cheaper
+     * than {@link #snapshot()} when a check only needs the freshest tail
+     * (e.g. on-flag short-window replay extraction).
+     */
+    public synchronized List<ReplayFrame> peekTail(int count) {
+        if (count <= 0 || frames.isEmpty()) return List.of();
+        int n = Math.min(count, frames.size());
+        ArrayList<ReplayFrame> out = new ArrayList<>(n);
+        int skip = frames.size() - n;
+        int i = 0;
+        for (ReplayFrame f : frames) {
+            if (i++ < skip) continue;
+            out.add(f);
+        }
+        return out;
+    }
+
     public synchronized int size() {
         return frames.size();
     }
