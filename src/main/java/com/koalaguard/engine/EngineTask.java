@@ -117,9 +117,12 @@ public final class EngineTask extends BukkitRunnable {
                 CheckContext ctx = new CheckContext(plugin, d, player, s, sim, s.tick);
                 for (SimCheck c : em.tickChecks()) {
                     if (!c.isEnabled()) continue;
+                    long t0 = System.nanoTime();
                     try { c.onTick(ctx); }
                     catch (Throwable t) {
                         plugin.getLogger().warning("Check " + c.getName() + " error: " + t);
+                    } finally {
+                        em.recordCheckTiming(c.getName(), System.nanoTime() - t0);
                     }
                 }
             }
@@ -260,11 +263,15 @@ public final class EngineTask extends BukkitRunnable {
         if (evaluate) {
             SimResult sim = PhysicsSimulator.simulate(d, player);
             CheckContext ctx = new CheckContext(plugin, d, player, s, sim, tick);
-            for (SimCheck c : plugin.getEngine().frameChecks()) {
+            EngineManager em = plugin.getEngine();
+            for (SimCheck c : em.frameChecks()) {
                 if (!c.isEnabled()) continue;
+                long t0 = System.nanoTime();
                 try { c.onTick(ctx); }
                 catch (Throwable t) {
                     plugin.getLogger().warning("Check " + c.getName() + " error: " + t);
+                } finally {
+                    em.recordCheckTiming(c.getName(), System.nanoTime() - t0);
                 }
             }
             plugin.getSetbackManager().markValid(d, player, f.simGround || near);

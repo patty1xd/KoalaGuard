@@ -18,7 +18,6 @@ import com.koalaguard.engine.checks.combat.HoneypotCheck;
 import com.koalaguard.engine.checks.combat.MaceCheck;
 import com.koalaguard.engine.checks.combat.MacroCheck;
 import com.koalaguard.engine.checks.combat.ShieldBypassCheck;
-import com.koalaguard.engine.checks.combat.SpoofedRotationCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
 import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
@@ -179,4 +178,30 @@ public final class EngineManager {
     public void cleanup(UUID uuid) {
         for (SimCheck c : byName.values()) c.cleanup(uuid);
     }
+
+    // ── Per-check timing telemetry ──
+    // Total nanoseconds spent in each check across all players this session.
+    // EngineTask wraps c.onTick(ctx) with this counter; /kg debug surfaces
+    // the top offenders so admins can disable expensive checks under load.
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.LongAdder> timeNs
+            = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.LongAdder> invocations
+            = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void recordCheckTiming(String name, long ns) {
+        timeNs.computeIfAbsent(name, k -> new java.util.concurrent.atomic.LongAdder()).add(ns);
+        invocations.computeIfAbsent(name, k -> new java.util.concurrent.atomic.LongAdder()).increment();
+    }
+
+    public Map<String, long[]> timing() {
+        Map<String, long[]> out = new LinkedHashMap<>();
+        for (String n : byName.keySet()) {
+            long ns = timeNs.getOrDefault(n, new java.util.concurrent.atomic.LongAdder()).sum();
+            long inv = invocations.getOrDefault(n, new java.util.concurrent.atomic.LongAdder()).sum();
+            out.put(n, new long[]{ ns, inv });
+        }
+        return out;
+    }
+
+    public void resetTiming() { timeNs.clear(); invocations.clear(); }
 }
