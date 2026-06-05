@@ -48,10 +48,16 @@ public final class BukkitStateListener implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         plugin.getDataManager().create(event.getPlayer());
         plugin.getReplayManager().start(event.getPlayer());
+        if (plugin.getNettyInjector() != null) {
+            plugin.getNettyInjector().inject(event.getPlayer());
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
+        if (plugin.getNettyInjector() != null) {
+            plugin.getNettyInjector().uninject(event.getPlayer().getUniqueId());
+        }
         plugin.getDataManager().remove(event.getPlayer().getUniqueId());
         plugin.getViolationManager().clearPlayer(event.getPlayer().getUniqueId());
         plugin.getEngine().cleanup(event.getPlayer().getUniqueId());
@@ -526,6 +532,36 @@ public final class BukkitStateListener implements Listener {
     public void onGameMode(PlayerGameModeChangeEvent event) {
         PlayerData d = plugin.getDataManager().get(event.getPlayer());
         if (d != null) d.gamemodeChangeMs = System.currentTimeMillis();
+    }
+
+    /**
+     * Vehicle dismount stamp — feeds CriticalsCheck's dismount-crit exploit
+     * path (a dismount resets the server fall distance, so a crit inside the
+     * grace window has no real arc behind it). Without this the field stays 0
+     * and that detection path can never fire.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onVehicleExit(org.bukkit.event.vehicle.VehicleExitEvent event) {
+        if (!(event.getExited() instanceof Player p)) return;
+        PlayerData d = plugin.getDataManager().get(p);
+        if (d != null) d.engine.combat.lastVehicleExitMs = System.currentTimeMillis();
+    }
+
+    /**
+     * Potion-effect change replay annotation — records ADDED effects on
+     * players so replays show buff timing alongside combat / movement.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPotionEffect(org.bukkit.event.entity.EntityPotionEffectEvent event) {
+        if (!(event.getEntity() instanceof Player p)) return;
+        if (event.getAction() != org.bukkit.event.entity.EntityPotionEffectEvent.Action.ADDED) return;
+        org.bukkit.potion.PotionEffect ne = event.getNewEffect();
+        if (ne == null) return;
+        var rf = new com.koalaguard.engine.replay.ReplayFrame(
+                System.nanoTime(), com.koalaguard.engine.replay.ReplayKind.HEALTH);
+        rf.intA = ne.getType().getKey().hashCode();
+        rf.byteA = (byte) Math.min(127, ne.getAmplifier());
+        plugin.getReplayManager().record(p.getUniqueId(), rf);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
