@@ -16,5 +16,8 @@ public enum PacketKind {
     BLOCK_PLACE,     // block placement
     CLICK_WINDOW,    // inventory click
     CLOSE_WINDOW,    // inventory close
-    PONG             // transaction confirmation (tick clock + RTT)
+    PONG,            // transaction confirmation (tick clock + RTT)
+    STEER_VEHICLE,   // boat/horse steering (BoatFly authoritative source)
+    PLAYER_INPUT,    // 1.21.2+ keyboard state — input/movement consistency
+    TELEPORT_CONFIRM // pearl/tp sequence — burst/double-accept fingerprinting
 }

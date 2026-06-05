@@ -26,6 +26,11 @@ public final class CapturedPacket {
     public int intA = -1, intB = -1;     // entityId / slot / windowId / id
     public String strA;                  // brand / channel
     public Object objA;                  // wrapper-specific extra
+    // 1.20.5+ INTERACT_ENTITY carries hand + sneaking; SwingArm carries hand.
+    // Kept as separate booleans so checks can scope analysis to a specific
+    // arm (e.g. dual-arm validation in HitValidation).
+    public boolean hand;                 // false = MAIN, true = OFF
+    public boolean sneakingAtSend;
 
     // Assigned on the main thread when the packet is consumed.
     public long tickIndex = -1;

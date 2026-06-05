@@ -53,5 +53,37 @@ public final class PacketRingLog {
         return false;
     }
 
+    /**
+     * Newest packet of a specific kind, or null. O(n) but exits at the first
+     * match; checks that only need the most recent attack / animation / etc.
+     * no longer iterate the full ring or allocate a list snapshot.
+     */
+    public CapturedPacket newestOfKind(PacketKind kind) {
+        int idx = (head - 1 + buf.length) % buf.length;
+        for (int i = 0; i < count; i++) {
+            CapturedPacket p = buf[idx];
+            if (p != null && p.kind == kind) return p;
+            idx = (idx - 1 + buf.length) % buf.length;
+        }
+        return null;
+    }
+
+    /**
+     * Count of packets of a given kind whose recvNanos lies within the last
+     * {@code windowNs}. Avoids an alloc-per-tick snapshot for rate checks.
+     */
+    public int countSinceNanos(PacketKind kind, long sinceNanos) {
+        int idx = (head - 1 + buf.length) % buf.length;
+        int n = 0;
+        for (int i = 0; i < count; i++) {
+            CapturedPacket p = buf[idx];
+            if (p == null) break;
+            if (p.recvNanos < sinceNanos) break;          // monotonic
+            if (p.kind == kind) n++;
+            idx = (idx - 1 + buf.length) % buf.length;
+        }
+        return n;
+    }
+
     public int size() { return count; }
 }
