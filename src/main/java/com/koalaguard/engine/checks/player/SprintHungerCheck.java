@@ -37,6 +37,23 @@ public final class SprintHungerCheck extends SimCheck {
     @Override
     public void onTick(CheckContext ctx) {
         if (ctx.unstableBasic()) return;
+        // Blindness + sprinting = vanilla-forbidden (Grim SprintD; zero FP).
+        // Evaluate before the exempt block so it fires regardless.
+        try {
+            if (ctx.player.hasPotionEffect(org.bukkit.potion.PotionEffectType.BLINDNESS)
+                    && ctx.state.sprinting) {
+                java.util.UUID id = ctx.data.getUuid();
+                if (!Boolean.TRUE.equals(blindFlagged.get(id))) {
+                    blindFlagged.put(id, true);
+                    diverge(ctx, cfgD("blind-score", 7.0), cfgD("threshold", 9.0),
+                            cfgI("blind-min-streak", 1),
+                            "sprinting while Blindness active (vanilla forbids)",
+                            false);
+                }
+            } else {
+                blindFlagged.put(ctx.data.getUuid(), false);
+            }
+        } catch (Throwable ignored) { }
         if (ctx.state.exFlying || ctx.state.exVehicle || ctx.state.exGliding
                 || ctx.state.exRiptide || ctx.state.exLevitation
                 || ctx.state.exLiquid) {
@@ -79,6 +96,9 @@ public final class SprintHungerCheck extends SimCheck {
                         food, minFood, speed),
                 false);
     }
+
+    private final java.util.Map<java.util.UUID, Boolean> blindFlagged
+            = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public void cleanup(java.util.UUID uuid) {

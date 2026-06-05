@@ -139,6 +139,35 @@ public final class MultiTaskCheck extends SimCheck {
                     "actions during uninterrupted item-use: "
                             + attacks + " attack, " + placements + " place",
                     false);
+            return;
+        }
+
+        // Sneak-toggle race during use: ≥2 START_SNEAKING + STOP_SNEAKING
+        // pairs inside one use session (no release). LiquidBounce NoSlow
+        // toggles sneak mid-draw to cancel use-slowdown while keeping the
+        // server-side use timer running.
+        int sneakToggles = 0;
+        long maxToggleSeq = -1;
+        for (CapturedPacket p : ctx.state.log.recent(256)) {
+            if (p.recvNanos < start) continue;
+            if (p.recvNanos - start > staleNs) continue;
+            if (p.kind == PacketKind.ENTITY_ACTION
+                    && ("START_SNEAKING".equals(p.strA) || "STOP_SNEAKING".equals(p.strA))) {
+                sneakToggles++;
+                if (p.seq > maxToggleSeq) maxToggleSeq = p.seq;
+            }
+        }
+        // 6 toggles: sneak does NOT cancel item-use in vanilla, so a player
+        // legitimately sneak-eating at a ledge can tap sneak a few times. Only
+        // a clearly inhuman toggle count in one uninterrupted use session
+        // (NoSlow sneak-race) flags.
+        int maxSneak = cfgI("max-sneak-toggles-in-use", 6);
+        if (sneakToggles >= maxSneak && maxToggleSeq > s.reportedSeq) {
+            s.reportedSeq = maxToggleSeq;
+            diverge(ctx, cfgD("sneak-score", 5.0), cfgD("threshold", 9.0),
+                    cfgI("sneak-min-streak", 2),
+                    "sneak-toggle race during item-use: " + sneakToggles + " toggles",
+                    false);
         }
     }
 

@@ -30,23 +30,40 @@ public final class OffhandCrashCheck extends SimCheck {
     @Override
     public void onTick(CheckContext ctx) {
         int limit = cfgI("max-swaps-per-tick", 3);   // >1 already impossible; 3 = ultra-safe
+        int clickLimit = cfgI("max-clicks-per-tick", 20);
+        int pluginLimit = cfgI("max-plugin-msg-per-tick", 8);
 
-        List<CapturedPacket> recent = ctx.state.log.recent(96);
-        Map<Long, Integer> perTick = new HashMap<>();
-        int worst = 0;
-        long worstTick = -1;
+        List<CapturedPacket> recent = ctx.state.log.recent(160);
+        Map<Long, Integer> swapPerTick = new HashMap<>();
+        Map<Long, Integer> clickPerTick = new HashMap<>();
+        int worstSwap = 0, worstClick = 0;
+        long worstSwapTick = -1, worstClickTick = -1;
         for (CapturedPacket p : recent) {
-            if (p.kind != PacketKind.DIGGING || !"SWAP_ITEM_WITH_OFFHAND".equals(p.strA)) continue;
-            int c = perTick.merge(p.tickIndex, 1, Integer::sum);
-            if (c > worst) { worst = c; worstTick = p.tickIndex; }
+            if (p.kind == PacketKind.DIGGING
+                    && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA)) {
+                int c = swapPerTick.merge(p.tickIndex, 1, Integer::sum);
+                if (c > worstSwap) { worstSwap = c; worstSwapTick = p.tickIndex; }
+            } else if (p.kind == PacketKind.CLICK_WINDOW) {
+                int c = clickPerTick.merge(p.tickIndex, 1, Integer::sum);
+                if (c > worstClick) { worstClick = c; worstClickTick = p.tickIndex; }
+            }
         }
 
-        if (worst >= limit) {
-            diverge(ctx, (worst - limit + 1) * cfgD("score-scale", 5.0),
+        boolean flagged = false;
+        if (worstSwap >= limit) {
+            diverge(ctx, (worstSwap - limit + 1) * cfgD("score-scale", 5.0),
                     cfgD("threshold", 9.0), cfgI("min-streak", 2),
-                    worst + " offhand swaps in a single tick (#" + worstTick + ")", false);
-        } else {
-            clean(ctx, 1.0);
+                    worstSwap + " offhand swaps in a single tick (#" + worstSwapTick + ")", false);
+            flagged = true;
         }
+        // CLICK_WINDOW flood — Mojang container packet crasher (LiquidBounce
+        // 0.31+ malformed-slot NBT). Vanilla shift-click + drag = ≤10/tick.
+        if (worstClick >= clickLimit) {
+            diverge(ctx, (worstClick - clickLimit + 1) * cfgD("click-score-scale", 4.0),
+                    cfgD("threshold", 9.0), cfgI("click-min-streak", 2),
+                    worstClick + " inventory clicks in a single tick (#" + worstClickTick + ")", false);
+            flagged = true;
+        }
+        if (!flagged) clean(ctx, 1.0);
     }
 }

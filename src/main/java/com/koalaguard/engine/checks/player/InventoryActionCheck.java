@@ -47,6 +47,27 @@ public final class InventoryActionCheck extends SimCheck {
         double bad = 0;
         StringBuilder why = new StringBuilder();
 
+        // Variant C: AutoQuiver / Silent arrow swap — a USE_ITEM with a bow
+        // immediately preceded by a window-0 click moving an arrow into the
+        // off-hand or hotbar slot within <80ms. Vanilla flow is draw-then-
+        // notice-no-arrow, not slot-juggle-then-draw on the same packet tick.
+        for (CapturedPacket p : chrono) {
+            if (p.kind != PacketKind.USE_ITEM) continue;
+            long preNs = cfgL("quiver-pre-draw-ns", 80_000_000L);
+            for (CapturedPacket q : chrono) {
+                if (q.kind != PacketKind.CLICK_WINDOW) continue;
+                if (q.intB != 0) continue;
+                long delta = p.recvNanos - q.recvNanos;
+                if (delta <= 0 || delta > preNs) continue;
+                if (q.intA == 40 || q.intA == 45                  // off-hand / hotbar 1
+                        || (q.intA >= 36 && q.intA <= 44)) {
+                    bad += cfgD("quiver-score", 5.0);
+                    why.append("silent-quiver draw-after-swap ");
+                    break;
+                }
+            }
+        }
+
         for (CapturedPacket p : chrono) {
             if (p.kind != PacketKind.CLICK_WINDOW) continue;
             if (p.seq > maxSeen) maxSeen = p.seq;
