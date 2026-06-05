@@ -94,7 +94,7 @@ public final class PredictionCheck extends SimCheck {
         // the simulator doesn't model — exempt while inside AND for a short
         // grace after leaving (residual reduced motion + block-edge slack).
         boolean webGrace = s.tick - s.lastSpecialBlockTick
-                < cfgI("special-block-grace-ticks", 25);
+                < cfgI("special-block-grace-ticks", 40);
         return s.exFlying || s.exVehicle || s.exGliding || s.exClimbing
                 || s.exLiquid || s.exRiptide || s.exLevitation || s.exSlowFalling
                 || s.exWeb || webGrace;

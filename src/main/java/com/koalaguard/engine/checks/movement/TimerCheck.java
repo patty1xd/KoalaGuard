@@ -96,11 +96,16 @@ public final class TimerCheck extends SimCheck {
         }
 
         double ratio = (double) accFrames / (double) accConf;
-        double eps = cfgD("max-ratio-excess", 0.18);
+        // 0.25 (was 0.18): a brief packet burst after a sub-instability micro-
+        // lag spike bunches movement frames and pushes the ratio to ~1.2 for a
+        // single window even on a legit client. A real timer cheat runs a
+        // SUSTAINED 1.3-2.0x, so 0.25 + a longer streak keeps every real catch
+        // while removing the transient-burst false positives.
+        double eps = cfgD("max-ratio-excess", 0.25);
 
         if (ratio > 1.0 + eps) {
             diverge(ctx, (ratio - 1.0) * cfgD("score-scale", 40.0),
-                    cfgD("threshold", 10.0), cfgI("min-streak", 2),
+                    cfgD("threshold", 10.0), cfgI("min-streak", 4),
                     String.format("tick ratio %.3f over %d server ticks (fast timer)", ratio, window), true);
             return;
         }
@@ -113,10 +118,17 @@ public final class TimerCheck extends SimCheck {
         for (long b : w.bucketFrames) { totalBucket += b; if (b > maxBucket) maxBucket = b; }
         if (totalBucket > 0 && accFrames >= minMoveFrames) {
             double maxFrac = (double) maxBucket / totalBucket;
-            if (maxFrac > cfgD("max-bucket-frac", 0.55)
-                    && ratio > 1.0 + cfgD("balance-min-ratio-excess", 0.05)) {
+            // 0.80 / 0.12 / streak 4 (was 0.55 / 0.05 / 2): normal play is
+            // bursty — sprint, stop, turn, sprint again — which legitimately
+            // concentrates movement frames into one or two buckets. The old
+            // 55%-of-frames + ratio>1.05 gate flagged exactly that. A genuine
+            // timer-balance cheat parks almost ALL frames in one bucket while
+            // still running a fast overall pace, so require ≥80% in one bucket,
+            // a clearly fast (>1.12) average, and 4 confirming windows.
+            if (maxFrac > cfgD("max-bucket-frac", 0.80)
+                    && ratio > 1.0 + cfgD("balance-min-ratio-excess", 0.12)) {
                 diverge(ctx, cfgD("balance-score", 5.0),
-                        cfgD("threshold", 10.0), cfgI("balance-min-streak", 2),
+                        cfgD("threshold", 10.0), cfgI("balance-min-streak", 4),
                         String.format("timer-balance: peak bucket %.0f%% of frames, ratio %.3f",
                                 maxFrac * 100, ratio), true);
                 return;
