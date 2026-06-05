@@ -87,6 +87,29 @@ public final class AutoClickerCheck extends SimCheck {
         boolean robotic = cv < cfgD("max-cv", 0.07)
                 || dupes >= cfgI("max-duplicates", 14);
 
+        // Bimodal burst+pause signature — 2-stage evasion (LiquidBounce
+        // Stabilized / Wurst Efficient): tight burst cluster (≈40-80ms) and
+        // a deliberate pause cluster (≈150-400ms). Mean+CV both pass the
+        // legacy gates because the distribution averages out. Detect via
+        // simple Hartigan-style dip: count fraction of intervals in
+        // [burst_lo,burst_hi] and [pause_lo,pause_hi], require both clusters
+        // populated and the gap between them empty.
+        int burst = 0, pause = 0, gap = 0;
+        double bLo = cfgD("burst-lo-ms", 40), bHi = cfgD("burst-hi-ms", 90);
+        double pLo = cfgD("pause-lo-ms", 150), pHi = cfgD("pause-hi-ms", 400);
+        for (long v : s.intervals) {
+            if (v >= bLo && v <= bHi) burst++;
+            else if (v >= pLo && v <= pHi) pause++;
+            else if (v > bHi && v < pLo) gap++;
+        }
+        int n = s.intervals.size();
+        double burstFrac = (double) burst / n;
+        double pauseFrac = (double) pause / n;
+        double gapFrac = (double) gap / n;
+        boolean bimodal = burstFrac > cfgD("min-burst-frac", 0.30)
+                && pauseFrac > cfgD("min-pause-frac", 0.20)
+                && gapFrac < cfgD("max-gap-frac", 0.10);
+
         // High-rate floor: sustained > 14 CPS over many samples is the bot
         // signature that defeats even ±jitter randomization (no human keeps
         // ≥14 CPS over 30+ clicks).
@@ -101,13 +124,15 @@ public final class AutoClickerCheck extends SimCheck {
         boolean absoluteImpossible = mean < cfgD("absolute-impossible-ms", 25.0)
                 && s.intervals.size() >= cfgI("absolute-min-samples", 12);
 
-        if ((fast && robotic) || inhumanRate || absoluteImpossible) {
+        if ((fast && robotic) || inhumanRate || absoluteImpossible || bimodal) {
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 10.0),
                     cfgI("min-streak", absoluteImpossible ? 1 : 3),
                     String.format("clicks mean=%.0fms cv=%.3f dup=%d n=%d%s",
                             mean, cv, dupes, s.intervals.size(),
                             absoluteImpossible ? " (PHYSICALLY IMPOSSIBLE)"
-                                    : inhumanRate ? " (inhuman rate)" : ""), false);
+                                    : inhumanRate ? " (inhuman rate)"
+                                    : bimodal ? String.format(" (bimodal burst=%.0f%% pause=%.0f%%)",
+                                            burstFrac * 100, pauseFrac * 100) : ""), false);
         } else {
             clean(ctx, 1.0);
         }

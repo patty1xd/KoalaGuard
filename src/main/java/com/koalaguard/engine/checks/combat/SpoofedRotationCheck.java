@@ -57,6 +57,10 @@ public final class SpoofedRotationCheck extends SimCheck {
         long firstPerfectNanos = Long.MIN_VALUE;
         long lastFlagNanos     = Long.MIN_VALUE;
         double lastAngle;         // for the description string
+        // Rolling window of recent angular errors for distribution analysis
+        // (uniform-noise spoofers add 1-3° random jitter to defeat the
+        // perfect-streak counter, producing flat error distribution).
+        final java.util.ArrayDeque<Double> recentErr = new java.util.ArrayDeque<>();
     }
 
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
@@ -93,6 +97,20 @@ public final class SpoofedRotationCheck extends SimCheck {
 
             s.totalActions++;
             s.lastAngle = ang;
+            s.recentErr.addLast(ang);
+            while (s.recentErr.size() > cfgI("dist-sample-cap", 24))
+                s.recentErr.removeFirst();
+
+            // TEMP diagnostic — prints each sampled action's angular error.
+            // Disable by setting `checks.spoofedrotation.log-samples: false`.
+            if (plugin.getConfig().getBoolean("checks.spoofedrotation.log-samples", true)) {
+                plugin.getLogger().info(String.format(
+                        "[spoofedrotation] %s %s err=%.3f° streak=%d/%d (perfect≤%.2f° tolerant>%.2f°)",
+                        ctx.player.getName(),
+                        p.kind == PacketKind.INTERACT_ENTITY ? "ATTACK id=" + p.intA
+                                : "PLACE @ " + (int) p.x + "," + (int) p.y + "," + (int) p.z,
+                        ang, s.perfectStreak, perfectNeed, perfectDeg, tolerantDeg));
+            }
 
             if (ang <= perfectDeg) {
                 if (s.perfectStreak == 0) s.firstPerfectNanos = p.recvNanos;
@@ -123,6 +141,37 @@ public final class SpoofedRotationCheck extends SimCheck {
             }
         }
         s.lastEventSeq = maxSeq;
+
+        // Uniform-noise spoof: cheats add 1-3° random noise so no individual
+        // hit is "perfect", but the resulting distribution is FLAT inside
+        // [0, X] rather than exponential decay (which is the human pattern —
+        // most hits cluster at small error, with a long tail of misses).
+        // Approximate KS via comparing the fraction in [0, mean] against the
+        // exponential expectation (~0.63). A flat distribution gives ~0.50.
+        if (!confirmed
+                && s.recentErr.size() >= cfgI("dist-min-samples", 18)) {
+            double sum = 0, mx = 0;
+            for (double v : s.recentErr) { sum += v; if (v > mx) mx = v; }
+            double mean = sum / s.recentErr.size();
+            if (mean > 0.6 && mean < cfgD("dist-max-mean-deg", 2.5)
+                    && mx < cfgD("dist-max-cap-deg", 3.5)) {
+                int below = 0;
+                for (double v : s.recentErr) if (v <= mean) below++;
+                double belowFrac = (double) below / s.recentErr.size();
+                if (belowFrac > cfgD("flat-min-frac", 0.42)
+                        && belowFrac < cfgD("flat-max-frac", 0.58)) {
+                    if (diverge(ctx, cfgD("flat-score", 6.0), cfgD("threshold", 9.0),
+                            cfgI("flat-min-streak", 3),
+                            String.format("uniform-noise spoof: mean=%.2f° max=%.2f° below-mean=%.0f%% n=%d",
+                                    mean, mx, belowFrac * 100, s.recentErr.size()),
+                            false)) {
+                        armCombatCancel(ctx);
+                    }
+                    s.recentErr.clear();
+                    return;
+                }
+            }
+        }
         if (!confirmed) clean(ctx, 0.2);
     }
 

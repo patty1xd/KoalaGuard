@@ -52,16 +52,33 @@ public final class AimC extends SimCheck {
         lastScoredNanos.put(id, newest);
 
         Set<Integer> targets = new HashSet<>();
+        float minYaw = Float.POSITIVE_INFINITY, maxYaw = Float.NEGATIVE_INFINITY;
+        boolean anyRot = false;
         for (CapturedPacket p : recent) {
             if (p.kind != PacketKind.INTERACT_ENTITY) continue;
             if (!String.valueOf(p.objA).contains("ATTACK")) continue;
             if (newest - p.recvNanos > windowNs) continue;
             Entity e = Combat.resolveById(ctx.player, p.intA, 8.0);
-            if (e instanceof LivingEntity && e != ctx.player) targets.add(p.intA);
+            if (e instanceof LivingEntity && e != ctx.player) {
+                targets.add(p.intA);
+                if (p.hasRot) {
+                    anyRot = true;
+                    if (p.yaw < minYaw) minYaw = p.yaw;
+                    if (p.yaw > maxYaw) maxYaw = p.yaw;
+                }
+            }
         }
 
+        // Sword-sweep FP guard: a single swing with Sweeping Edge can naturally
+        // damage 2-3 adjacent mobs all at the same yaw. Real multi-target aura
+        // snaps rotation between victims, producing yaw spread well over 10°.
+        // If all hits share rotation, treat the cluster as one swing, not aura.
+        double yawSpread = anyRot ? Math.abs(maxYaw - minYaw) : 360.0;
+        if (yawSpread > 180.0) yawSpread = 360.0 - yawSpread;
+        double minYawSpread = cfgD("min-yaw-spread-deg", 10.0);
+
         int maxT = cfgI("max-targets", 3);
-        if (targets.size() >= maxT) {
+        if (targets.size() >= maxT && yawSpread >= minYawSpread) {
             if (diverge(ctx, (targets.size() - maxT + 1) * cfgD("score", 5.0),
                     cfgD("threshold", 9.0), cfgI("min-streak", 2),
                     targets.size() + " distinct targets within window", false)) {

@@ -48,8 +48,11 @@ public final class MacroCheck extends SimCheck {
         long lastJumpImpulseNanos  = Long.MIN_VALUE;
         long lastSeenSprintSeq     = Long.MIN_VALUE;
         long lastJumpFrameTick     = Long.MIN_VALUE;
+        long lastInvOpenNanos      = Long.MIN_VALUE;
+        long lastInvSeq            = Long.MIN_VALUE;
         final Deque<Long> sprintIntervalsMs = new ArrayDeque<>();
         final Deque<Long> jumpIntervalsMs   = new ArrayDeque<>();
+        final Deque<Long> invIntervalsMs    = new ArrayDeque<>();
     }
 
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
@@ -120,6 +123,30 @@ public final class MacroCheck extends SimCheck {
         }
         if (ctx.state.current != null) s.lastJumpFrameTick = ctx.state.current.tick;
 
+        // ─── S2 — Inventory-tick macro ───
+        // Cheats that open inventory at exact server-tick boundaries to
+        // cancel knockback / freeze sprint. Gap between consecutive
+        // CLOSE_WINDOW packets that lock to ~50ms (or multiples) is the
+        // fingerprint — a human's inventory cycle is hundreds of ms with
+        // large variance.
+        long maxInvSeq = s.lastInvSeq;
+        for (int i = recent.size() - 1; i >= 0; i--) {
+            CapturedPacket p = recent.get(i);
+            if (p.kind != PacketKind.CLOSE_WINDOW) continue;
+            if (p.seq <= s.lastInvSeq) continue;
+            if (p.seq > maxInvSeq) maxInvSeq = p.seq;
+            if (s.lastInvOpenNanos != Long.MIN_VALUE) {
+                long ms = (p.recvNanos - s.lastInvOpenNanos) / 1_000_000L;
+                if (ms > 0 && ms < 3000) {
+                    s.invIntervalsMs.addLast(ms);
+                    while (s.invIntervalsMs.size() > cfgI("sample-cap", 24))
+                        s.invIntervalsMs.removeFirst();
+                }
+            }
+            s.lastInvOpenNanos = p.recvNanos;
+        }
+        s.lastInvSeq = maxInvSeq;
+
         double bad = 0;
         StringBuilder why = new StringBuilder();
 
@@ -146,6 +173,20 @@ public final class MacroCheck extends SimCheck {
                 bad += cfgD("jump-score", 7.0);
                 why.append(String.format("jump-reset macro mean=%.0fms sd=%.1fms n=%d ",
                         mean, sd, s.jumpIntervalsMs.size()));
+            }
+        }
+        if (s.invIntervalsMs.size() >= cfgI("inv-min-samples", 8)) {
+            double sd = MathUtil.standardDeviation(s.invIntervalsMs);
+            double mean = MathUtil.average(s.invIntervalsMs);
+            // Tick-aligned: mean within 5ms of a multiple of 50ms AND sd<8ms.
+            double tickRem = mean % 50.0;
+            double tickErr = Math.min(tickRem, 50.0 - tickRem);
+            if (sd < cfgD("inv-max-sd-ms", 8.0)
+                    && tickErr < cfgD("inv-tick-tolerance-ms", 5.0)
+                    && mean < cfgD("inv-max-mean-ms", 500.0)) {
+                bad += cfgD("inv-score", 6.0);
+                why.append(String.format("inventory-tick macro mean=%.0fms sd=%.1fms n=%d ",
+                        mean, sd, s.invIntervalsMs.size()));
             }
         }
 

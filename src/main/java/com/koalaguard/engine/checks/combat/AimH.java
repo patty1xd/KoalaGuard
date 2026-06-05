@@ -109,18 +109,37 @@ public final class AimH extends SimCheck {
         if (s.react.size() < cfgI("min-samples", 6)) return;
         double mean = MathUtil.average(s.react);
         double sd = MathUtil.standardDeviation(s.react);
+        // Lag-1 autocorrelation. Uniform-randomised humanisers (Wurst-style
+        // ±100ms around 100-120ms) produce INDEPENDENT samples → |r1| → 0.
+        // Real humans show positive autocorrelation from muscle-memory
+        // clustering. Suspicious-independence path catches humanised
+        // triggerbot that defeats the mean+sd path.
+        Double[] arr = s.react.toArray(new Double[0]);
+        double am = mean, num = 0, den = 0;
+        for (int i = 0; i < arr.length; i++) {
+            double d = arr[i] - am;
+            den += d * d;
+            if (i > 0) num += (arr[i - 1] - am) * d;
+        }
+        double r1 = den > 1e-9 ? num / den : 0;
         if (debug()) {
             plugin.getLogger().info("[aimh] " + ctx.player.getName()
                     + " reactMean=" + String.format("%.0f", mean)
                     + "ms sd=" + String.format("%.0f", sd)
-                    + "ms n=" + s.react.size());
+                    + "ms r1=" + String.format("%.2f", r1)
+                    + " n=" + s.react.size());
         }
-        if (mean < cfgD("max-mean-ms", 90.0) && sd < cfgD("max-sd-ms", 45.0)) {
+        boolean inhumanFast = mean < cfgD("max-mean-ms", 90.0)
+                && sd < cfgD("max-sd-ms", 45.0);
+        boolean independentRandom = mean < cfgD("rand-max-mean-ms", 180.0)
+                && Math.abs(r1) < cfgD("max-acorr", 0.1)
+                && s.react.size() >= cfgI("rand-min-samples", 12);
+        if (inhumanFast || independentRandom) {
             // Alert only — staff correlate; no single-confirm combat cancel.
             diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 10.0),
                     cfgI("min-streak", 3),
-                    String.format("inhuman reaction mean=%.0fms sd=%.0fms n=%d",
-                            mean, sd, s.react.size()), false);
+                    String.format("inhuman reaction mean=%.0fms sd=%.0fms r1=%.2f n=%d",
+                            mean, sd, r1, s.react.size()), false);
         } else {
             clean(ctx, 1.0);
         }

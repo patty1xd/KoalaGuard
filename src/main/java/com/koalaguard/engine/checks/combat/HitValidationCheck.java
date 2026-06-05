@@ -93,6 +93,13 @@ public final class HitValidationCheck extends SimCheck {
         }
         boolean swung = swings > 0;
 
+        // NOTE: an attack-cooldown gate was intentionally NOT added here.
+        // Player.getAttackCooldown() reads ~0 for a tick or two right after
+        // EVERY legitimate attack (it resets to 0 then recharges), and
+        // attacking at low cooldown is legal vanilla behaviour (spam-clicking
+        // just deals reduced damage). Flagging it produced false positives on
+        // ordinary combat, so it was removed.
+
         double bad = 0;
         StringBuilder why = new StringBuilder();
         if (angle > maxAngle) {

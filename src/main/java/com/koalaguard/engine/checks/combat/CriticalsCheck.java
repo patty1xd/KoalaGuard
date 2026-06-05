@@ -93,6 +93,23 @@ public final class CriticalsCheck extends SimCheck {
         } else {
             clean(ctx, 2.0);
         }
+
+        // Vehicle-dismount crit exploit: dismounting resets server fall
+        // distance, so a crit landing inside the dismount-grace window has
+        // no real arc behind it. The frame-side phantom check above misses
+        // this because the dismount also makes simGround flicker — so check
+        // it independently. Legitimate post-dismount crits need a full arc
+        // (handled by the prior haveFrames+leftGround+realFall path).
+        long sinceDismountMs = System.currentTimeMillis() - ctx.state.combat.lastVehicleExitMs;
+        if (ctx.state.combat.lastVehicleExitMs > 0
+                && sinceDismountMs < cfgL("dismount-grace-ms", 200L)
+                && !leftGround && !realFall) {
+            diverge(ctx, cfgD("dismount-score", 5.0), cfgD("threshold", 10.0),
+                    cfgI("dismount-min-streak", 2),
+                    String.format("crit within %dms of dismount with no fall arc",
+                            sinceDismountMs),
+                    false);
+        }
     }
 
     @Override

@@ -126,7 +126,16 @@ public final class AimI extends SimCheck {
         // spoofed yaw irrelevant to movement: residual is essentially uniform
         // [0, 22.5°] → mean ≈ 11°. We require BOTH a large mean residual AND
         // enough samples — a transient spike from a quick flick doesn't fire.
-        if (mean > meanCap && sd > sdMin) {
+        //
+        // NOTE: a "movement-fix" inverse path (flag TOO-perfect residual:
+        // mean≈0, sd≈0) was considered and rejected. A player simply walking
+        // in a straight line while looking in the direction of travel ALSO
+        // produces a near-zero, low-variance residual, so it is
+        // indistinguishable from a movement-fix cheat by residual alone and
+        // would false-positive on ordinary straight-line combat movement.
+        boolean directDesync = mean > meanCap && sd > sdMin;
+
+        if (directDesync) {
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 11.0),
                     cfgI("min-streak", 4),
                     String.format("rotation-movement desync: mean=%.1f° sd=%.1f° n=%d",

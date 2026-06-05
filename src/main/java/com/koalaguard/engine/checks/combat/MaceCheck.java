@@ -6,6 +6,8 @@ import com.koalaguard.engine.check.CheckContext;
 import com.koalaguard.engine.check.SimCheck;
 import com.koalaguard.engine.state.PositionFrame;
 import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.enchantments.Enchantment;
 
 import java.util.Map;
 import java.util.UUID;
@@ -106,6 +108,25 @@ public final class MaceCheck extends SimCheck {
                 false)) {
             armCombatCancel(ctx);
         }
+        // Riptide→mace zero-tick combo: if the player recently triggered
+        // Riptide (a high upward velocity event) and then landed a smash an
+        // unrealistically short time later, the fall arc was real but the
+        // weapon swap was inhuman. The Riptide launch creates a real fall
+        // distance so the previous guards would pass; this catches the auto
+        // tool-swap pattern itself.
+        try {
+            long now = System.currentTimeMillis();
+            long riptideAgoMs = now - ctx.data.lastRiptideMs;
+            if (ctx.data.lastRiptideMs > 0 && riptideAgoMs < cfgL("riptide-swap-ms", 500L)) {
+                ItemStack hand = ctx.player.getInventory().getItemInMainHand();
+                if (hand != null && hand.getType() == Material.MACE) {
+                    diverge(ctx, cfgD("riptide-score", 6.0), cfgD("threshold", 10.0),
+                            cfgI("riptide-min-streak", 1),
+                            String.format("riptide→mace zero-tick swap (%dms)", riptideAgoMs),
+                            false);
+                }
+            }
+        } catch (Throwable ignored) { }
     }
 
     @Override

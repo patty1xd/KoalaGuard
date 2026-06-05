@@ -64,22 +64,43 @@ public final class AimB extends SimCheck {
             double ex = el[0], ey = el[1], ez = el[2];
 
             double[] box = ctx.state.targets.boxAt(p.intA, p.recvNanos);
-            double cx, cy, cz, dist;
+            double minX, minY, minZ, maxX, maxY, maxZ, dist;
             if (box != null) {
                 dist = Combat.distanceToBox(ex, ey, ez, box);
-                cx = (box[0] + box[3]) / 2.0;
-                cy = (box[1] + box[4]) / 2.0;
-                cz = (box[2] + box[5]) / 2.0;
+                minX = box[0]; minY = box[1]; minZ = box[2];
+                maxX = box[3]; maxY = box[4]; maxZ = box[5];
             } else {
                 dist = Combat.distanceToBox(ex, ey, ez, victim);
                 BoundingBox b = victim.getBoundingBox();
-                cx = b.getCenterX(); cy = b.getCenterY(); cz = b.getCenterZ();
+                minX = b.getMinX(); minY = b.getMinY(); minZ = b.getMinZ();
+                maxX = b.getMaxX(); maxY = b.getMaxY(); maxZ = b.getMaxZ();
             }
             if (dist < minDist) continue;                    // corner/edge case
             any = true;
 
-            if (CollisionEngine.rayBlocked(ctx.player.getWorld(), ex, ey, ez,
-                    cx, cy, cz)) {
+            // Multi-point occlusion: centre + the eight AABB corners (9 points).
+            // Only flag if EVERY plausible aim point is occluded. A legit fight
+            // around cover always leaves at least one corner visible; a real
+            // through-wall hit has the whole victim hidden.
+            double cx = (minX + maxX) * 0.5;
+            double cy = (minY + maxY) * 0.5;
+            double cz = (minZ + maxZ) * 0.5;
+            double[][] samples = {
+                {cx, cy, cz},
+                {minX, minY, minZ}, {minX, minY, maxZ},
+                {minX, maxY, minZ}, {minX, maxY, maxZ},
+                {maxX, minY, minZ}, {maxX, minY, maxZ},
+                {maxX, maxY, minZ}, {maxX, maxY, maxZ},
+            };
+            org.bukkit.World w = ctx.player.getWorld();
+            boolean allBlocked = true;
+            for (double[] s : samples) {
+                if (!CollisionEngine.rayBlocked(w, ex, ey, ez, s[0], s[1], s[2])) {
+                    allBlocked = false;
+                    break;
+                }
+            }
+            if (allBlocked) {
                 flagged = true;
                 if (diverge(ctx, cfgD("score", 5.0), cfgD("threshold", 9.0),
                         cfgI("min-streak", 3),

@@ -46,6 +46,9 @@ public final class CrystalAuraCheck extends SimCheck {
 
         int crystals = 0;
         int anchorOps = 0;
+        int stackedObsidian = 0;
+        long lastObsidianPlaceNs = Long.MIN_VALUE / 2;
+        long lastObsidianBlockKey = Long.MIN_VALUE / 2;
         World w = ctx.player.getWorld();
         for (CapturedPacket p : recent) {
             if (nowNs - p.recvNanos > windowNs) continue;
@@ -56,19 +59,41 @@ public final class CrystalAuraCheck extends SimCheck {
             } else if (p.kind == PacketKind.BLOCK_PLACE && p.hasPos) {
                 Material clicked = w.getBlockAt((int) p.x, (int) p.y, (int) p.z).getType();
                 if (clicked == Material.RESPAWN_ANCHOR) anchorOps++;
+                // Stacked-obsidian crystal-base placement: two BLOCK_PLACE on
+                // the same XYZ within <100ms. Vanilla cannot click the same
+                // spot twice that fast and have both register as placements;
+                // CrystalAura clients pre-spam place packets to reserve the
+                // crystal base before the server validates the first one.
+                // NOTE: `recent` is newest→oldest, so use |Δt| for the gap —
+                // a signed compare would be negative every iteration and
+                // count same-coord places that are seconds apart (a legit
+                // place/break/replace), which is a false positive.
+                long key = (long) p.x * 73856093L
+                        ^ (long) p.y * 19349663L
+                        ^ (long) p.z * 83492791L;
+                if (key == lastObsidianBlockKey
+                        && Math.abs(p.recvNanos - lastObsidianPlaceNs) < 100_000_000L) {
+                    stackedObsidian++;
+                }
+                lastObsidianBlockKey = key;
+                lastObsidianPlaceNs = p.recvNanos;
             }
         }
 
         int maxCrystal = cfgI("max-per-sec", 7);
         int maxAnchor = cfgI("max-anchor-per-sec", 5);
+        int maxStacked = cfgI("max-stacked-place", 2);
         boolean badCrystal = crystals >= maxCrystal;
         boolean badAnchor = anchorOps >= maxAnchor;
+        boolean badStacked = stackedObsidian >= maxStacked;
 
-        if (badCrystal || badAnchor) {
+        if (badCrystal || badAnchor || badStacked) {
             double bad = Math.max(0, crystals - maxCrystal + 1) * cfgD("score-scale", 4.0)
-                       + Math.max(0, anchorOps - maxAnchor + 1) * cfgD("anchor-score-scale", 4.0);
+                       + Math.max(0, anchorOps - maxAnchor + 1) * cfgD("anchor-score-scale", 4.0)
+                       + Math.max(0, stackedObsidian - maxStacked + 1) * cfgD("stacked-score-scale", 4.0);
             diverge(ctx, bad, cfgD("threshold", 9.0), cfgI("min-streak", 3),
-                    String.format("crystal/s=%d anchor-ops/s=%d", crystals, anchorOps), false);
+                    String.format("crystal/s=%d anchor-ops/s=%d stacked-place=%d",
+                            crystals, anchorOps, stackedObsidian), false);
         } else if (crystals > 0 || anchorOps > 0) {
             clean(ctx, 1.0);
         } else {

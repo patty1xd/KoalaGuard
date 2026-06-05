@@ -81,23 +81,49 @@ public final class AimG extends SimCheck {
         for (double v : d) mag.add(Math.abs(v) * 4.0);   // ×4 → finer entropy buckets
         double entropy = MathUtil.entropy(mag);
 
+        // Lag-1 / Lag-2 autocorrelation on |yaw deltas|. Aimbot easing curves
+        // (ease-out, Bézier) keep adjacent deltas correlated even when jitter
+        // is layered on top; human tremor has near-zero lag correlation.
+        double mean = 0;
+        for (double v : mag) mean += v;
+        mean /= mag.size();
+        double var = 0, c1 = 0, c2 = 0;
+        for (int i = 0; i < mag.size(); i++) {
+            double a = mag.get(i) - mean;
+            var += a * a;
+            if (i >= 1) c1 += a * (mag.get(i - 1) - mean);
+            if (i >= 2) c2 += a * (mag.get(i - 2) - mean);
+        }
+        double acf1 = var > 1e-9 ? c1 / var : 0;
+        double acf2 = var > 1e-9 ? c2 / var : 0;
+
         boolean tooSmooth = signRate < cfgD("max-jerk-sign-rate", 0.18);
         boolean lowEntropy = entropy < cfgD("max-entropy-bits", 1.6);
+        // High autocorrelation CORROBORATES only — it must NOT trigger on its
+        // own. Legitimate smooth pursuit of a strafing target also produces
+        // strongly correlated yaw deltas, so requiring it alongside the
+        // existing low-jerk + low-entropy AND-gate keeps the check FP-safe.
+        boolean highAcf = acf1 > cfgD("max-acf1", 0.4)
+                && acf2 > cfgD("max-acf2", 0.3);
 
         if (debug()) {
             plugin.getLogger().info("[aimg] " + ctx.player.getName()
                     + " signRate=" + String.format("%.3f", signRate)
                     + " entropy=" + String.format("%.2f", entropy)
+                    + " acf1=" + String.format("%.2f", acf1)
+                    + " acf2=" + String.format("%.2f", acf2)
                     + " n=" + d.size() + " turn=" + String.format("%.0f", turn));
         }
 
         // Alert only — a behavioural statistic must not neutralise combat on
         // its own; staff correlate it with the other independent signals.
-        if (tooSmooth && lowEntropy) {
+        // tooSmooth is required; entropy OR autocorrelation can be the second
+        // corroborating factor (both indicate machine easing).
+        if (tooSmooth && (lowEntropy || highAcf)) {
             diverge(ctx, cfgD("score", 5.0), cfgD("threshold", 12.0),
                     cfgI("min-streak", 8),
-                    String.format("smooth rotation: jerkSignRate=%.3f entropy=%.2f n=%d",
-                            signRate, entropy, d.size()), false);
+                    String.format("smooth rotation: jerkSignRate=%.3f entropy=%.2f acf1=%.2f n=%d",
+                            signRate, entropy, acf1, d.size()), false);
         } else {
             clean(ctx, 1.0);
         }

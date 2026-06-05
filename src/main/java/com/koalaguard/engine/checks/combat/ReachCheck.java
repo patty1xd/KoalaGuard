@@ -50,6 +50,29 @@ public final class ReachCheck extends SimCheck {
         PositionFrame f = ctx.state.frameAtOrBefore(atk);
         double[] eye = Combat.eyeLook(f, ctx.player);
 
+        // Split-tick guard: if the attacker injected a movement frame
+        // immediately AFTER the attack's bound tick, a large forward scoot
+        // in just one tick is the split-tick fingerprint (move forward,
+        // attack inside the same network tick boundary, gain effective
+        // reach). Tick-delta and scoot-delta both bounded keeps the FP risk
+        // small — normal sprint motion is ≤ ~0.28 per tick.
+        PositionFrame after = ctx.state.frameAfter(atk);
+        if (after != null && f != null) {
+            double dx2 = after.x - f.x, dz2 = after.z - f.z;
+            double scoot = Math.sqrt(dx2 * dx2 + dz2 * dz2);
+            long tickGap = after.tick - f.tick;
+            // 0.70 floor: a Speed-II sprint-jump can cover ~0.5 blocks in one
+            // tick, so a tighter threshold would FP on legit burst movement.
+            // Real split-tick reach abuse scoots 0.7-1.5+ blocks.
+            if (scoot > cfgD("split-tick-min-scoot", 0.70)
+                    && tickGap > 0 && tickGap <= cfgI("split-tick-max-ticks", 1)) {
+                diverge(ctx, cfgD("split-tick-score", 5.0), cfgD("threshold", 9.0),
+                        cfgI("split-tick-min-streak", 3),
+                        String.format("split-tick scoot %.3f over %d tick before attack",
+                                scoot, tickGap), false);
+            }
+        }
+
         // PROPER lag compensation: the victim could have been at ANY of its
         // recent positions within the network-uncertainty window. Take the
         // SMALLEST eye→hitbox distance over that window — only flag if the hit

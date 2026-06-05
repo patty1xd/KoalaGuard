@@ -60,11 +60,19 @@ public final class ShieldBypassCheck extends SimCheck {
      * matched EVERY inventory click — mid-fight inventory use (armor swap,
      * hotbar drag) produced spurious swap events that paired with attacks
      * into a fake "machine cadence" pattern. Restrict to hotbar swaps only.
+     *
+     * 1.21.11 addition: an off-hand-only CLICK_WINDOW targeting slot 45
+     * (the off-hand inventory slot) is the new auto-axe vector — the cheat
+     * swaps an axe into the off-hand silently and attacks with it without a
+     * hotbar key press. Off-hand slot clicks ARE distinguishable from the
+     * armor/hotbar-drag FPs the previous CLICK_WINDOW heuristic suffered.
      */
     private static boolean weaponSwap(CapturedPacket p) {
         return p.kind == PacketKind.HELD_ITEM
             || (p.kind == PacketKind.DIGGING
-                && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA));
+                && "SWAP_ITEM_WITH_OFFHAND".equals(p.strA))
+            || (p.kind == PacketKind.CLICK_WINDOW
+                && p.intA == 45 && p.intB == 0);
     }
 
     @Override

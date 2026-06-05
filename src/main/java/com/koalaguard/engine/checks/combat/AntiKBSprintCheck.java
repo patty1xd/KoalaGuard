@@ -92,6 +92,14 @@ public final class AntiKBSprintCheck extends SimCheck {
         if (!hadKb) { s.missStreak = 0; clean(ctx, 0.5); return; }
 
         // ─── S1 — STOP_SPRINTING absence in the window ───
+        // Any STOP_SPRINTING in the post-damage window = compliance. NOTE: we
+        // deliberately do NOT treat an immediate STOP→START re-sprint as
+        // suspicious. A player HOLDING the sprint key through knockback emits
+        // exactly that pattern (the client stops sprint on damage, then
+        // re-sends START the same tick because the key is still pressed) — it
+        // is fully legitimate. Distinguishing real anti-kb from a held sprint
+        // requires checking whether the knockback velocity was actually
+        // absorbed, which is VelocityCheck's job, not this timing heuristic.
         boolean stopped = false;
         for (CapturedPacket p : ctx.state.log.recent(96)) {
             if (p.kind != PacketKind.ENTITY_ACTION) continue;

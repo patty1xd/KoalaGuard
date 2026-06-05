@@ -60,6 +60,13 @@ public final class RotationCheck extends SimCheck {
         //  which was the FP user reported as "false checks for anything if you
         //  move a bit". NaN/Infinity still caught above.)
 
+        // NOTE: a "yaw delta > 180° in one tick" rule was considered and
+        // rejected — PositionFrame.dYaw is stored ALREADY WRAPPED to [0,180]
+        // (EngineTask: abs(wrapAngle(yaw-prevYaw))), so it can never exceed
+        // 180 and the rule would be dead code. The raw pre-wrap delta is not
+        // retained, and a genuine 180° one-tick flick is achievable by humans
+        // (fast flick-aim), so flagging near-180 would false-positive.
+        //
         // The previous "quantised aim" GCD analysis was removed: it was
         // false-positive prone on raw-input mice and specific sensitivities
         // (the leftover signal the user kept hitting). The silent-aim job is

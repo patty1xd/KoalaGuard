@@ -111,9 +111,30 @@ public final class VelocityCheck extends SimCheck {
                     cfgD("threshold", 9.0), cfgI("min-streak", 3),
                     String.format("absorbed %.0f%% of simulated knockback (along=%.3f exp=%.3f)",
                             frac * 100, k.peakAlong, k.expectedH), false);
-        } else {
-            clean(ctx, 2.0);
+            return;
         }
+
+        // GroundSpoof bypass: client claims onGround=true throughout the
+        // KB window so the server applies the smaller in-air→on-ground
+        // damping curve. Cross-check with simGround (geometric truth) and
+        // server-side fall distance progression. If the engine saw airborne
+        // ticks during the KB window but the client claimed grounded the
+        // whole time, flag — even if the projected motion happens to land
+        // inside the legitimate fraction band.
+        int spoofTicks = 0;
+        for (PositionFrame ff : ctx.state.recentFrames(cfgI("window-ticks", 6) + 2)) {
+            if (ff.tick <= kbTick || ff.tick > k.evalTick) continue;
+            if (ff.clientGround && !ff.simGround) spoofTicks++;
+        }
+        if (spoofTicks >= cfgI("min-spoof-ticks", 2) && k.expectedH > 0.25) {
+            diverge(ctx, cfgD("spoof-score", 5.0),
+                    cfgD("threshold", 9.0), cfgI("min-streak", 3),
+                    String.format("ground-spoof during kb: %d ticks client-grounded but airborne",
+                            spoofTicks), false);
+            return;
+        }
+
+        clean(ctx, 2.0);
     }
 
     @Override

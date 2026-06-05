@@ -68,6 +68,13 @@ public final class AimA extends SimCheck {
             // Victim rewound to the attack instant when we have it (accurate),
             // else the live hitbox (still safe — the threshold is huge).
             double[] box = ctx.state.targets.boxAt(p.intA, p.recvNanos);
+            // Quantization / point-blank guard: if the reconstructed eye is
+            // inside (or touching) the victim AABB, any look direction "hits"
+            // it — angle to centre is meaningless. Skip rather than risk FP.
+            double dist = box != null
+                    ? Combat.distanceToBox(el[0], el[1], el[2], box)
+                    : Combat.distanceToBox(el[0], el[1], el[2], victim);
+            if (dist < 1.0E-3) continue;
             double err = box != null
                     ? Combat.aimAngle(el[0], el[1], el[2], (float) el[3], (float) el[4], box)
                     : Combat.aimAngle(el[0], el[1], el[2], (float) el[3], (float) el[4], victim);

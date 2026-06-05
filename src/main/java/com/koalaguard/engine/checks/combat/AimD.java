@@ -110,6 +110,15 @@ public final class AimD extends SimCheck {
                         Math.abs(MathUtil.wrapAngle(g.yaw - before.yaw)));
             }
 
+            // NOTE: a "zero yaw delta + dead-on hit" silent-aura path was
+            // considered and rejected. From the server's perspective a silent
+            // aura's SENT yaw is already on-target, which is INDISTINGUISHABLE
+            // from a legitimate stationary engagement — a player walking
+            // straight at a target they're already aimed at lands repeated
+            // dead-on hits with zero mouse movement. Flagging that is a false
+            // positive. Silent-aim is correctly owned by AimI (rotation vs
+            // movement desync), AimF (GCD) and SpoofedRotation, which CAN tell
+            // them apart. AimD stays strictly the snap-and-return signature.
             if (snap >= snapMin && err <= lockCone
                     && bestReturn <= returnEps) {
                 flagged = true;

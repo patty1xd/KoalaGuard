@@ -85,12 +85,33 @@ public final class AimE extends SimCheck {
         if (s.err.size() < cfgI("min-samples", 20)) return;
         double mean = MathUtil.average(s.err);
         double sd = MathUtil.standardDeviation(s.err);
-        if (mean < cfgD("max-mean-deg", 2.5) && sd < cfgD("max-sd-deg", 1.3)) {
+        // Lag-1 autocorrelation on the error series — humanized noise from
+        // aimbots is generated per-tick and is essentially white (|r1| << 0.2),
+        // while a human's natural aim drift is correlated tick-to-tick
+        // (|r1| typically 0.3–0.7). Combined with low mean+sd, low |r1| is the
+        // signature of synthetic jitter on top of a perfect lock.
+        double r1 = 0.0;
+        if (s.err.size() >= 8) {
+            Double[] arr = s.err.toArray(new Double[0]);
+            double num = 0, den = 0;
+            for (int i = 0; i < arr.length; i++) {
+                double d = arr[i] - mean;
+                den += d * d;
+                if (i > 0) num += (arr[i - 1] - mean) * d;
+            }
+            if (den > 1e-9) r1 = num / den;
+        }
+        boolean perfect = mean < cfgD("max-mean-deg", 2.5)
+                && sd < cfgD("max-sd-deg", 1.3);
+        boolean syntheticJitter = mean < cfgD("jitter-mean-deg", 3.5)
+                && sd > cfgD("jitter-min-sd-deg", 0.4)
+                && Math.abs(r1) < cfgD("max-acorr", 0.2);
+        if (perfect || syntheticJitter) {
             // Alert only — never cancel combat off a single statistical confirm.
             diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 10.0),
                     cfgI("min-streak", 3),
-                    String.format("lag-comp machine lock mean=%.2f° sd=%.2f° n=%d",
-                            mean, sd, s.err.size()), false);
+                    String.format("lag-comp machine lock mean=%.2f° sd=%.2f° r1=%.2f n=%d",
+                            mean, sd, r1, s.err.size()), false);
         } else if (any) {
             clean(ctx, 1.0);
         }

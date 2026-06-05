@@ -85,6 +85,27 @@ public final class AimF extends SimCheck {
             bad += cfgD("pitch-score", 3.0);
             why.append(String.format("pitch GCD %.5f ", gPitch));
         }
+        // Inverse signature: "too clean" — modern aimbots that spoof GCD
+        // produce deltas where a HIGH fraction land within tight tolerance of
+        // a single step. A real mouse + raw input has occasional outliers
+        // (sub-pixel error, accel events, polling jitter) so cluster fraction
+        // never approaches 1. >85% pure-multiple of a single discrete step
+        // across 50+ samples is synthetic.
+        if (gYaw >= minStep && gYaw < cfgD("max-clean-step-deg", 0.5)) {
+            double tol = cfgD("clean-tol", 0.02);
+            int hits = 0;
+            for (double v : yaw) {
+                double r = v / gYaw;
+                double frac = Math.abs(r - Math.round(r));
+                if (frac < tol) hits++;
+            }
+            double frac = (double) hits / yaw.size();
+            if (frac > cfgD("clean-frac", 0.85)) {
+                bad += cfgD("clean-score", 4.0);
+                why.append(String.format("yaw too-clean step=%.4f frac=%.0f%% ",
+                        gYaw, frac * 100.0));
+            }
+        }
 
         if (debug()) {
             plugin.getLogger().info("[aimf] " + ctx.player.getName()

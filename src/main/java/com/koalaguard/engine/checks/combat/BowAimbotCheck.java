@@ -52,6 +52,7 @@ public final class BowAimbotCheck extends SimCheck {
         long lastReleaseSeq = Long.MIN_VALUE;
         long useStartNanos  = Long.MIN_VALUE;
         final Deque<Double> releaseAngles = new ArrayDeque<>();
+        final Deque<Double> predictAngles = new ArrayDeque<>();
         int snapHits;
     }
 
@@ -123,6 +124,10 @@ public final class BowAimbotCheck extends SimCheck {
             Player attacker = ctx.player;
             org.bukkit.Location l = attacker.getEyeLocation();
             double bestAng = Double.MAX_VALUE;
+            double bestPredictAng = Double.MAX_VALUE;
+            Vector look = Combat.lookVector(relYaw, relPitch);
+            // Arrow muzzle speed (blocks/sec) — vanilla full-draw bow ≈ 60.
+            double arrowSpeed = cfgD("arrow-speed", 60.0);
             for (org.bukkit.entity.Entity e :
                     attacker.getWorld().getNearbyEntities(l, 60, 60, 60)) {
                 if (!(e instanceof Player)) continue;            // PvP only
@@ -133,18 +138,39 @@ public final class BowAimbotCheck extends SimCheck {
                 double cx = e.getBoundingBox().getCenterX();
                 double cy = e.getBoundingBox().getCenterY();
                 double cz = e.getBoundingBox().getCenterZ();
-                Vector look = Combat.lookVector(relYaw, relPitch);
                 Vector to = new Vector(cx - l.getX(), cy - l.getY(), cz - l.getZ());
                 if (to.lengthSquared() < 1e-7) continue;
-                to.normalize();
-                double dot = Math.max(-1.0, Math.min(1.0, look.dot(to)));
+                double dist = to.length();
+                Vector toN = to.clone().normalize();
+                double dot = Math.max(-1.0, Math.min(1.0, look.dot(toN)));
                 double ang = Math.toDegrees(Math.acos(dot));
                 if (ang < bestAng) bestAng = ang;
+
+                // Predicted-intercept angle: where will the victim be when
+                // the arrow arrives? Bot aim is mathematically locked onto
+                // the lead vector; humans don't compute it.
+                Vector vel = pl.getVelocity();
+                double ttkSec = dist / Math.max(1.0, arrowSpeed);
+                double px = cx + vel.getX() * ttkSec * 20.0;
+                double py = cy + vel.getY() * ttkSec * 20.0;
+                double pz = cz + vel.getZ() * ttkSec * 20.0;
+                Vector toP = new Vector(px - l.getX(), py - l.getY(), pz - l.getZ());
+                if (toP.lengthSquared() > 1e-7) {
+                    toP.normalize();
+                    double pdot = Math.max(-1.0, Math.min(1.0, look.dot(toP)));
+                    double pang = Math.toDegrees(Math.acos(pdot));
+                    if (pang < bestPredictAng) bestPredictAng = pang;
+                }
             }
             if (bestAng < 90.0) {                       // someone was in front
                 s.releaseAngles.addLast(bestAng);
                 while (s.releaseAngles.size() > cfgI("sample-cap", 12))
                     s.releaseAngles.removeFirst();
+            }
+            if (bestPredictAng < 90.0) {
+                s.predictAngles.addLast(bestPredictAng);
+                while (s.predictAngles.size() > cfgI("sample-cap", 12))
+                    s.predictAngles.removeFirst();
             }
             // Reset the draw cursor so a follow-up release needs a fresh USE.
             s.useStartNanos = Long.MIN_VALUE;
@@ -162,11 +188,26 @@ public final class BowAimbotCheck extends SimCheck {
         boolean inhumanAccuracy = mean < maxMean && sd < maxSd;
         boolean snappy = s.snapHits >= cfgI("min-snap-hits", 3);
 
-        if (inhumanAccuracy && snappy) {
+        // Predictive-intercept fingerprint: bot's lead-aim residuals cluster
+        // tighter than its naive-aim residuals (the bot is aiming where the
+        // victim WILL be). If predict residuals are < 1.5° mean and lower
+        // than naive residuals by a clear margin, the player is computing
+        // the lead vector — which a human cannot do.
+        boolean leading = false;
+        if (s.predictAngles.size() >= cfgI("min-samples", 5)) {
+            double pMean = MathUtil.average(s.predictAngles);
+            double pSd   = MathUtil.standardDeviation(s.predictAngles);
+            leading = pMean < cfgD("predict-max-mean-deg", 1.5)
+                    && pSd < cfgD("predict-max-sd-deg", 1.2)
+                    && pMean < mean - cfgD("predict-vs-naive-edge", 0.5);
+        }
+
+        if ((inhumanAccuracy && snappy) || leading) {
             diverge(ctx, cfgD("score", 7.0), cfgD("threshold", 9.0),
                     cfgI("min-streak", 2),
-                    String.format("bow aimbot: mean=%.2f° sd=%.2f° snaps=%d n=%d",
-                            mean, sd, s.snapHits, s.releaseAngles.size()),
+                    String.format("bow aimbot: mean=%.2f° sd=%.2f° snaps=%d n=%d%s",
+                            mean, sd, s.snapHits, s.releaseAngles.size(),
+                            leading ? " +lead-lock" : ""),
                     false);
         } else if (inhumanAccuracy || snappy) {
             // Half-signal — bleed up gently.
