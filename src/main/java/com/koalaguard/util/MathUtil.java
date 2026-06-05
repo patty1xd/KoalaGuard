@@ -131,4 +131,23 @@ public final class MathUtil {
     public static double clampD(double v, double min, double max) {
         return v < min ? min : Math.min(v, max);
     }
+
+    /**
+     * Lag-1 autocorrelation: measures serial dependence in movement/rotation sequences.
+     * Human input is largely uncorrelated (r ≈ 0); bots/macros show strong positive correlation
+     * (r > 0.5) due to predictable state-machines. Detects non-random movement patterns.
+     */
+    public static double autoCorrelationLag1(Collection<? extends Number> values) {
+        if (values == null || values.size() < 2) return 0.0;
+        double mean = average(values);
+        double c0 = 0.0, c1 = 0.0;
+        java.util.List<? extends Number> list = values instanceof java.util.List ?
+            (java.util.List<? extends Number>) values : new java.util.ArrayList<>(values);
+        for (int i = 0; i < list.size(); i++) {
+            double x = list.get(i).doubleValue() - mean;
+            c0 += x * x;
+            if (i > 0) c1 += x * (list.get(i - 1).doubleValue() - mean);
+        }
+        return c1 / c0;
+    }
 }

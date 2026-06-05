@@ -32,4 +32,18 @@ public final class ServerMetrics {
         int ms = pingMs(player);
         return ms < 0 ? 0 : ms / 50;
     }
+
+    /**
+     * Average milliseconds per tick — more sensitive than TPS at detecting
+     * tick-loop overload (TPS clamps at 20 and only drops on hard misses;
+     * MSPT shows degradation building from 20→48ms long before TPS reacts).
+     * Used to widen check tolerances under load and to gate setbacks.
+     */
+    public double mspt() {
+        try {
+            return Bukkit.getServer().getAverageTickTime();
+        } catch (Throwable ignored) {
+            return 50.0;
+        }
+    }
 }

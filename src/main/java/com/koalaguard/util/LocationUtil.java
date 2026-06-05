@@ -82,7 +82,12 @@ public final class LocationUtil {
             || m == Material.POWDER_SNOW
             || m == Material.SWEET_BERRY_BUSH
             || m == Material.HONEY_BLOCK
-            || m == Material.SCAFFOLDING;
+            || m == Material.SCAFFOLDING
+            // 1.20+ mangrove roots: slow + reduce fall distance — same FP
+            // surface as cobweb in mangrove swamps. Adding here prevents
+            // PredictionCheck setbacks for legit swamp traversal.
+            || m == Material.MUDDY_MANGROVE_ROOTS
+            || m == Material.MANGROVE_ROOTS;
     }
 
     /**
