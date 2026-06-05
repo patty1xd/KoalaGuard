@@ -96,7 +96,7 @@ public final class MultiTaskCheck extends SimCheck {
         // the netty usingItem flag may briefly still be true. That race
         // produced the user-reported FPs. If a RELEASE was seen recently,
         // treat the rest of this tick as a closing use-session and skip.
-        long releaseGraceNs = cfgL("release-grace-ms", 200L) * 1_000_000L;
+        long releaseGraceNs = cfgL("release-grace-ms", 400L) * 1_000_000L;
         for (CapturedPacket p : ctx.state.log.recent(64)) {
             if (p.kind == PacketKind.DIGGING && "RELEASE_USE_ITEM".equals(p.strA)
                     && nowNs - p.recvNanos <= releaseGraceNs) {
@@ -131,11 +131,11 @@ public final class MultiTaskCheck extends SimCheck {
         // flag staying open through ≥3 attacks/places IS the cheat signature
         // — a single race-window action no longer flags.
         int totalActions = attacks + placements;
-        int max = cfgI("max-actions-in-use", 3);
+        int max = cfgI("max-actions-in-use", 4);
         if (totalActions >= max && maxActionSeq > s.reportedSeq) {
             s.reportedSeq = maxActionSeq;
             diverge(ctx, cfgD("score", 6.0), cfgD("threshold", 9.0),
-                    cfgI("min-streak", 2),
+                    cfgI("min-streak", 3),
                     "actions during uninterrupted item-use: "
                             + attacks + " attack, " + placements + " place",
                     false);
@@ -161,11 +161,11 @@ public final class MultiTaskCheck extends SimCheck {
         // legitimately sneak-eating at a ledge can tap sneak a few times. Only
         // a clearly inhuman toggle count in one uninterrupted use session
         // (NoSlow sneak-race) flags.
-        int maxSneak = cfgI("max-sneak-toggles-in-use", 6);
+        int maxSneak = cfgI("max-sneak-toggles-in-use", 10);
         if (sneakToggles >= maxSneak && maxToggleSeq > s.reportedSeq) {
             s.reportedSeq = maxToggleSeq;
             diverge(ctx, cfgD("sneak-score", 5.0), cfgD("threshold", 9.0),
-                    cfgI("sneak-min-streak", 2),
+                    cfgI("sneak-min-streak", 3),
                     "sneak-toggle race during item-use: " + sneakToggles + " toggles",
                     false);
         }
