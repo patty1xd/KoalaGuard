@@ -29,6 +29,22 @@ public final class BadPacketsBrand extends SimCheck {
                     cfgI("min-streak", 1),
                     "client brand advertises autototem: " + ctx.data.packetBrand,
                     false);
+            return;
+        }
+
+        // Empty / missing brand evasion: 2025 cheat clients suppress the
+        // minecraft:brand plugin message entirely to dodge brand fingerprints.
+        // Vanilla ALWAYS sends "vanilla"; mod loaders send their loader name.
+        // A null or empty packetBrand more than 5s after join is the signature.
+        long sinceJoinMs = System.currentTimeMillis() - ctx.data.joinMs;
+        if (sinceJoinMs > cfgL("brand-grace-ms", 5000L)
+                && (ctx.data.packetBrand == null
+                    || ctx.data.packetBrand.isEmpty()
+                    || "unknown".equalsIgnoreCase(ctx.data.packetBrand))) {
+            diverge(ctx, cfgD("empty-brand-score", 4.0), cfgD("threshold", 9.0),
+                    cfgI("empty-brand-min-streak", 1),
+                    "client never sent a brand string (evasion)",
+                    false);
         }
     }
 }

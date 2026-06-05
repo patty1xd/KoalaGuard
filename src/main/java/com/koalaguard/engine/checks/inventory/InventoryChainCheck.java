@@ -72,9 +72,31 @@ public final class InventoryChainCheck extends SimCheck {
             diverge(ctx, cfgD("score", 4.0), cfgD("threshold", 12.0),
                     cfgI("min-streak", 4),
                     "offhand → " + now + " appeared with no swap/click chain", false);
-        } else {
-            clean(ctx, 1.5);
+            return;
         }
+
+        // Materialization guard: even with a valid chain, the offhand item
+        // must exist SOMEWHERE in the player's inventory at the time. If it
+        // doesn't, the item was injected by a creative-give / dispenser / etc.
+        // — flag once (much higher streak, very low score) so legit
+        // server-side give operations within a tick still don't fire.
+        try {
+            boolean foundElsewhere = false;
+            org.bukkit.inventory.PlayerInventory pi = ctx.player.getInventory();
+            for (org.bukkit.inventory.ItemStack it : pi.getContents()) {
+                if (it != null && it.getType() == now) { foundElsewhere = true; break; }
+            }
+            if (!foundElsewhere
+                    && pi.getItemInMainHand().getType() != now) {
+                diverge(ctx, cfgD("materialize-score", 2.0),
+                        cfgD("threshold", 12.0),
+                        cfgI("materialize-min-streak", 6),
+                        "offhand → " + now + " not present elsewhere in inventory (materialized)",
+                        false);
+            }
+        } catch (Throwable ignored) { }
+
+        clean(ctx, 1.5);
     }
 
     @Override

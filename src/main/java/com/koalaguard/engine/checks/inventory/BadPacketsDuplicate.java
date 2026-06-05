@@ -44,24 +44,46 @@ public final class BadPacketsDuplicate extends SimCheck {
         long maxGapMs = cfgL("max-gap-ms", 5L);
         long max = seen;
         CapturedPacket prevClick = null;
+        CapturedPacket prevAttack = null;
         boolean flagged = false;
 
         for (CapturedPacket p : chrono) {
-            if (p.kind != PacketKind.CLICK_WINDOW) continue;
-            if (p.seq > max) max = p.seq;
-            if (p.seq > seen && prevClick != null
-                    && prevClick.intA == p.intA && prevClick.intB == p.intB
-                    && (p.recvNanos - prevClick.recvNanos) / 1_000_000L <= maxGapMs
-                    && p.recvNanos >= prevClick.recvNanos) {
-                flagged = true;
-                diverge(ctx, cfgD("score", 4.0), cfgD("threshold", 6.0),
-                        cfgI("min-streak", 2),
-                        String.format("duplicate slot click slot=%d win=%d gap=%dms",
-                                p.intA, p.intB,
-                                (p.recvNanos - prevClick.recvNanos) / 1_000_000L),
-                        false);
+            if (p.kind == PacketKind.CLICK_WINDOW) {
+                if (p.seq > max) max = p.seq;
+                if (p.seq > seen && prevClick != null
+                        && prevClick.intA == p.intA && prevClick.intB == p.intB
+                        && (p.recvNanos - prevClick.recvNanos) / 1_000_000L <= maxGapMs
+                        && p.recvNanos >= prevClick.recvNanos) {
+                    flagged = true;
+                    diverge(ctx, cfgD("score", 4.0), cfgD("threshold", 6.0),
+                            cfgI("min-streak", 2),
+                            String.format("duplicate slot click slot=%d win=%d gap=%dms",
+                                    p.intA, p.intB,
+                                    (p.recvNanos - prevClick.recvNanos) / 1_000_000L),
+                            false);
+                }
+                prevClick = p;
+            } else if (p.kind == PacketKind.INTERACT_ENTITY
+                    && String.valueOf(p.objA).contains("ATTACK")) {
+                // Duplicate-attack: vanilla can fire at most one ATTACK on a
+                // given entity per tick. Two ATTACK packets on the SAME entity
+                // bound to the same tickIndex is impossible by hand.
+                if (p.seq > max) max = p.seq;
+                if (p.seq > seen && prevAttack != null
+                        && prevAttack.intA == p.intA
+                        && prevAttack.tickIndex == p.tickIndex
+                        && (p.recvNanos - prevAttack.recvNanos) / 1_000_000L
+                                <= cfgL("attack-dup-gap-ms", 20L)
+                        && p.recvNanos >= prevAttack.recvNanos) {
+                    flagged = true;
+                    diverge(ctx, cfgD("attack-dup-score", 6.0), cfgD("threshold", 6.0),
+                            cfgI("attack-dup-min-streak", 1),
+                            String.format("duplicate ATTACK on entity %d in tick %d",
+                                    p.intA, p.tickIndex),
+                            false);
+                }
+                prevAttack = p;
             }
-            prevClick = p;
         }
         lastSeq.put(id, max);
         if (!flagged && max > seen) clean(ctx, 0.5);
