@@ -19,7 +19,6 @@ import com.koalaguard.engine.checks.combat.MaceCheck;
 import com.koalaguard.engine.checks.combat.MacroCheck;
 import com.koalaguard.engine.checks.combat.ShieldBypassCheck;
 import com.koalaguard.engine.checks.combat.CriticalsCheck;
-import com.koalaguard.engine.checks.combat.CrystalAuraCheck;
 import com.koalaguard.engine.checks.combat.HitValidationCheck;
 import com.koalaguard.engine.checks.combat.ReachCheck;
 import com.koalaguard.engine.checks.combat.RotationCheck;
@@ -46,12 +45,10 @@ import com.koalaguard.engine.checks.movement.NoSlowCheck;
 import com.koalaguard.engine.checks.movement.PhaseCheck;
 import com.koalaguard.engine.checks.movement.PredictionCheck;
 import com.koalaguard.engine.checks.movement.SpiderCheck;
-import com.koalaguard.engine.checks.movement.TimerCheck;
 import com.koalaguard.engine.checks.movement.VehicleFlyCheck;
 import com.koalaguard.engine.checks.player.CheatClientCheck;
 import com.koalaguard.engine.checks.player.InventoryActionCheck;
 import com.koalaguard.engine.checks.player.MultiTaskCheck;
-import com.koalaguard.engine.checks.player.OffhandCrashCheck;
 import com.koalaguard.engine.checks.player.SprintHungerCheck;
 import com.koalaguard.engine.checks.world.AirPlaceCheck;
 import com.koalaguard.engine.checks.world.AutoWebCheck;
@@ -87,7 +84,6 @@ public final class EngineManager {
         add(new PredictionCheck(plugin));
         add(new PhaseCheck(plugin));
         add(new NoFallCheck(plugin));
-        add(new TimerCheck(plugin));
         add(new FastClimbCheck(plugin));
         add(new AntiVoidCheck(plugin));
         add(new AirJumpCheck(plugin));
@@ -106,7 +102,6 @@ public final class EngineManager {
         add(new RotationCheck(plugin));
         add(new VelocityCheck(plugin));
         add(new AutoClickerCheck(plugin));
-        add(new CrystalAuraCheck(plugin));
         add(new CriticalsCheck(plugin));
 
         // ── Aim family — KillAura split into independent, FP-tuned checks ──
@@ -144,7 +139,6 @@ public final class EngineManager {
         add(new CheatClientCheck(plugin));
         add(new MultiTaskCheck(plugin));
         add(new InventoryActionCheck(plugin));
-        add(new OffhandCrashCheck(plugin));
         add(new SprintHungerCheck(plugin));
         add(new NukerCheck(plugin));
         add(new MultiPlaceCheck(plugin));

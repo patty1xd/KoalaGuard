@@ -257,6 +257,11 @@ public final class EngineTask extends BukkitRunnable {
         s.framesThisTick++;
         s.pushRotation(yaw, pitch);
 
+        // Frame-accurate liquid stamp (waterfall-climb grace for Spider /
+        // AntiVoid). Tested against the reconstructed position so it doesn't
+        // flicker like the once-per-tick live exLiquid flag.
+        if (LocationUtil.nearLiquidAt(player.getWorld(), x, y, z)) s.lastLiquidTick = tick;
+
         if (ground) { s.groundTicks++; s.airTicks = 0; s.sinceGroundTicks = 0; }
         else { s.airTicks++; s.groundTicks = 0; s.sinceGroundTicks++; }
 
