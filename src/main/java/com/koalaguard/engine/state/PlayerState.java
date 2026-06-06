@@ -118,6 +118,15 @@ public final class PlayerState {
                    exDead, exSpectator, exWeb;
     /** Tick the player was last in a movement-altering block (web grace). */
     public long lastSpecialBlockTick = Long.MIN_VALUE / 2;
+    /**
+     * Tick the player was last in / next to liquid, tested FRAME-ACCURATELY
+     * against the reconstructed position (not the once-per-tick live
+     * {@code exLiquid}). Used by Spider / AntiVoid as a grace window so
+     * swimming up a waterfall against a wall — where the live liquid flag
+     * flickers off at the water's edge while the current is still pushing the
+     * player up — is never mistaken for wall-climb or void-hover.
+     */
+    public long lastLiquidTick = Long.MIN_VALUE / 2;
 
     public PlayerState(UUID uuid, String name) {
         this.uuid = uuid;
