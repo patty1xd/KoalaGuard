@@ -94,6 +94,22 @@ public final class AimI extends SimCheck {
             return;
         }
 
+        // Momentum makes the velocity vector a BLEND of recent inputs, not the
+        // instantaneous yaw+WASD derivative — so the residual is only
+        // physically meaningful in steady-state GROUND movement. Two legit
+        // cases break the vanilla assumption and were the false positives
+        // (e.g. jumping around an opponent to crit them):
+        //   • Airborne — air-control is weak, so while jumping the velocity
+        //     keeps the PRE-JUMP momentum direction while the camera freely
+        //     rotates to track the target → huge residual with no cheat.
+        //   • Fast camera tracking — whipping the yaw to follow a strafing
+        //     opponent makes the velocity lag the new yaw by ~dYaw, spiking
+        //     the residual for a frame or two.
+        // Sampling only grounded, low-yaw-rate frames removes both FPs while
+        // leaving the sustained ground desync a real silent-aim still emits.
+        if (!f.simGround) return;
+        if (f.dYaw > cfgD("max-yaw-rate-deg", 12.0)) return;
+
         UUID id = ctx.data.getUuid();
         S s = state.computeIfAbsent(id, k -> new S());
         if (f.tick == s.lastTick) return;
