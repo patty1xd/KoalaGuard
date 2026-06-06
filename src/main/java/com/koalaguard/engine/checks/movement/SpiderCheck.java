@@ -27,8 +27,18 @@ public final class SpiderCheck extends SimCheck {
         PlayerState s = ctx.state;
         PositionFrame f = s.current;
         if (f == null) return;
+        // Waterfall-climb grace: a player swimming up flowing water against a
+        // wall legitimately gains height pressed to a wall. The live exLiquid
+        // flag flickers off at the water's edge, so also honour a frame-
+        // accurate liquid test at THIS frame plus a short trailing grace
+        // (covers the 1-2 ticks of residual up-momentum after exiting the
+        // water at the top of the fall).
+        boolean liquidGrace = s.exLiquid
+                || s.tick - s.lastLiquidTick < cfgI("liquid-grace-ticks", 20)
+                || com.koalaguard.util.LocationUtil.nearLiquidAt(
+                        ctx.player.getWorld(), f.x, f.y, f.z);
         if (ctx.unstable() || s.exClimbing || s.exWeb || s.exFlying || s.exGliding
-                || s.exVehicle || s.exLevitation || s.exRiptide || s.exLiquid
+                || s.exVehicle || s.exLevitation || s.exRiptide || liquidGrace
                 || f.simGround) {
             clean(ctx, 1.0);
             return;
