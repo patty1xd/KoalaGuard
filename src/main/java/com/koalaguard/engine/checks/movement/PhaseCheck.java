@@ -27,7 +27,13 @@ public final class PhaseCheck extends SimCheck {
         PositionFrame f = ctx.state.current;
         if (f == null) return;
 
-        if (ctx.unstable() || ctx.state.exVehicle || ctx.state.exGliding) {
+        // Liquid grace: shooting up a water column (kelp/bubble elevator) and
+        // clearing the top with high upward momentum briefly clips the
+        // reconstructed body box into the lip block's collision geometry — a
+        // vanilla water-exit, not noclip. Exempt while in / just-left water.
+        boolean liquidGrace = ctx.state.exLiquid
+                || ctx.state.tick - ctx.state.lastLiquidTick < cfgI("liquid-grace-ticks", 20);
+        if (ctx.unstable() || ctx.state.exVehicle || ctx.state.exGliding || liquidGrace) {
             clean(ctx, 1.0);
             return;
         }

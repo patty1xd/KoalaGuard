@@ -64,22 +64,34 @@ public final class ClickTpCheck extends SimCheck {
         PositionFrame f = s.current;
         if (f == null) return;
 
+        boolean liquidGrace = s.exLiquid
+                || s.tick - s.lastLiquidTick < cfgI("liquid-grace-ticks", 20);
         if (ctx.unstable() || s.exFlying || s.exVehicle || s.exGliding
-                || s.exRiptide || s.exLevitation || s.exClimbing || s.exWeb) {
+                || s.exRiptide || s.exLevitation || s.exClimbing || s.exWeb
+                || liquidGrace) {
             clean(ctx, 1.0);
             return;
         }
         long now = System.currentTimeMillis();
         if (now - ctx.data.lastVelocityMs < 1500 || now - ctx.data.lastDamageMs < 1000
                 || now - ctx.data.lastTeleportMs < 2000 || now - ctx.data.elytraMs < 2000
-                || now - ctx.data.slimeBounceMs < 1500 || now - ctx.data.lastSlimeOrBedMs < 1500) {
+                || now - ctx.data.slimeBounceMs < 1500 || now - ctx.data.lastSlimeOrBedMs < 1500
+                || now - ctx.data.bubbleColumnMs < 1500) {
             return;
         }
 
         double maxH = cfgD("max-horizontal", 1.2);     // ~4x sprint, way past any input
-        double maxV = cfgD("max-vertical", 1.5);
+        // Vertical is GRAVITY-AWARE and directional. Vanilla free-fall caps at
+        // terminal velocity (~3.92 b/t), so a long drop (e.g. off a tall water
+        // platform) legitimately reaches large NEGATIVE dy — flagging on
+        // |dy| would set the player back on any tall fall. A downward move is
+        // only impossible if it EXCEEDS terminal (> max-vertical-down); upward
+        // motion past max-vertical-up is a launch/warp no input can produce.
+        double maxVUp   = cfgD("max-vertical-up",   1.5);
+        double maxVDown = cfgD("max-vertical-down", 4.5);   // terminal + slack
         double h = f.horizontalSpeed();
-        if (h > maxH || Math.abs(f.dy) > maxV) {
+        boolean vertWarp = f.dy > maxVUp || f.dy < -maxVDown;
+        if (h > maxH || vertWarp) {
             diverge(ctx, cfgD("score", 12.0), cfgD("threshold", 10.0),
                     cfgI("min-streak", 1),
                     String.format("teleport dx=%.2f dy=%.2f dz=%.2f", f.dx, f.dy, f.dz),
@@ -101,7 +113,11 @@ public final class ClickTpCheck extends SimCheck {
             counted++;
         }
         double sumHCap = cfgD("max-window-h", 4.0);
-        double sumVCap = cfgD("max-window-v", 5.0);
+        // 18.0 (was 5.0): four ticks at terminal velocity sum to ~15.7 of
+        // vertical travel, so the old cap flagged any long fall. Horizontal
+        // (sumH) is the real distributed-clicktp signal; vertical stays only as
+        // a sanity backstop above what gravity can ever accumulate.
+        double sumVCap = cfgD("max-window-v", 18.0);
         if (counted >= win && (sumH > sumHCap || sumV > sumVCap)) {
             diverge(ctx, cfgD("window-score", 12.0), cfgD("threshold", 10.0),
                     cfgI("window-min-streak", 1),
