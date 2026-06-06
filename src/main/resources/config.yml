@@ -124,34 +124,6 @@ checks:
     teleport-score: 8.0
     teleport-min-streak: 1
 
-  timer:
-    enabled: true
-    max-violations: 12
-    punishment: kick
-    ban-duration: 7d
-    window-ticks: 60
-    # 0.25 (was 0.18): tolerate the transient ratio spike a post-micro-lag
-    # packet burst produces; a real fast-timer is a SUSTAINED 1.3-2.0x.
-    max-ratio-excess: 0.25
-    score-scale: 40.0
-    threshold: 10.0
-    # 4 (was 2): require the fast ratio to persist across multiple windows so
-    # a one-window burst never confirms.
-    min-streak: 4
-    # Timer-balance (fast-then-slow alternation) hardened against bursty-but-
-    # legal play: need ≥80% of frames in one bucket AND a fast average.
-    max-bucket-frac: 0.80
-    balance-min-ratio-excess: 0.12
-    balance-min-streak: 4
-    # CRITICAL: only evaluate the ratio when there are enough MOVEMENT frames
-    # in the window. s.tick (movement-tick counter) FREEZES while the player
-    # is stationary (rotation-only packets create no PositionFrame), so a
-    # ratio-based comparison gives 0 for any standing-still player. The old
-    # slow-timer logic falsely flagged this — which is why "Timer alerts for
-    # literally anything, even standing still." Slow-timer detection is now
-    # entirely off; it can't be done correctly with this metric.
-    min-move-frames: 30
-
   fastclimb:
     enabled: true
     max-violations: 12
@@ -173,6 +145,10 @@ checks:
     score: 5.0
     threshold: 12.0
     min-streak: 6
+    # Frame-accurate liquid grace (ticks). Swimming up a waterfall against a
+    # wall holds dy≈0 with no ground below, which looks like void-hover; this
+    # grace prevents that FP. Raise if you still see it on very tall falls.
+    liquid-grace-ticks: 20
 
   airjump:
     enabled: true
@@ -404,7 +380,9 @@ checks:
   jesus:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-dy: 0.12, min-speed: 0.08, score: 5.0, threshold: 12.0, min-streak: 6, dolphin-scan: 16, dolphin-max-descent: 0.40, dolphin-score: 4.0, dolphin-min-streak: 4 }
   # SpiderCheck — min-up raised 0.02→0.10 and min-air-ticks 4→8 so corner /
   # doorway jumps don't FP on the upward half of a normal sprint-jump.
-  spider:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, min-up: 0.10, min-air-ticks: 8, score: 5.0, threshold: 10.0, min-streak: 5 }
+  # liquid-grace-ticks: waterfall-climb FP guard — swimming up flowing water
+  # against a wall gains height pressed to a wall, which looks like wall-climb.
+  spider:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, min-up: 0.10, min-air-ticks: 8, liquid-grace-ticks: 20, score: 5.0, threshold: 10.0, min-streak: 5 }
   # Disabled by default — proper elytra detection needs full glide physics.
   elytrafly:    { enabled: false, max-violations: 10, punishment: kick, ban-duration: 14d, min-climb-dy: 0.15, rocket-window-ms: 3000, score: 3.0, threshold: 12.0, min-streak: 25 }
 
@@ -445,15 +423,12 @@ checks:
   # yaw by something OTHER than an integer multiple of 45° (the 8 valid
   # WASD-combinations). Sustained mean residual >10° = silent-aim signature.
   # Sample is in-combat moving frames only; alert-only.
-  aimi:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, min-speed: 0.10, sample-cap: 60, min-samples: 36, max-mean-residual: 10.0, min-sd-residual: 0.0, score: 6.0, threshold: 11.0, min-streak: 4 }
+  # Only samples GROUNDED, low-turn-rate frames: momentum makes the velocity
+  # vector meaningless while airborne (jumping to crit) or while whipping the
+  # camera to track a strafing opponent — those were the false positives.
+  # max-yaw-rate-deg: skip a frame whose yaw turned more than this (fast track).
+  aimi:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, min-speed: 0.10, max-yaw-rate-deg: 12.0, sample-cap: 60, min-samples: 36, max-mean-residual: 10.0, min-sd-residual: 0.0, score: 6.0, threshold: 11.0, min-streak: 4 }
 
-  # Crystal break rate + respawn-anchor cycle rate. Catches classic
-  # CrystalAura plus AnchorAura / safe-anchor / Wurst's AnchorAura. The
-  # silent-aim part of aura attacks lands on AimA-H independently.
-  # Headroom raised (per-sec 7→11, anchor 5→8, stacked 2→4, streak 3→5) so
-  # fast LEGIT crystal/anchor PvP never trips it — a real aura runs 15-25/s,
-  # well clear of these. The silent-aim part of aura attacks lands on AimA-I.
-  crystalaura:  { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, max-per-sec: 11, max-anchor-per-sec: 8, max-stacked-place: 4, score-scale: 4.0, anchor-score-scale: 4.0, stacked-score-scale: 4.0, threshold: 9.0, min-streak: 5 }
   # Uses PRECISE simGround + a real-fall exclusion so legit jump/air crits
   # never flag — only a hop that never leaves the ground and never falls.
   # `cap-*` keys surface the HIGHEST-priority damage-event PREVENTION that
@@ -542,9 +517,6 @@ checks:
   # AutoSteal (non-zero window-id burst — vanilla shift-click cap is 1/tick,
   # a stealer fires 10+ in 100ms).
   inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, chest-burst-window-ns: 250000000, chest-burst-threshold: 6, chest-score-scale: 2.0, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
-  # Counts swaps bound to the SAME reconstructed tick (vanilla sends <=1/tick,
-  # so mashing F can never trip it — only an injected flood can).
-  offhandcrash: { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-swaps-per-tick: 3, score-scale: 5.0, threshold: 9.0, min-streak: 2 }
   # MultiPlace — limit raised 3→5 since vanilla 1.9+ allows simultaneous
   # mainhand+offhand placement, and the check now counts DISTINCT block
   # coordinates (not raw packets).
