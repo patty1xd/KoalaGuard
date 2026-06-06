@@ -63,6 +63,28 @@ public final class LocationUtil {
     }
 
     /**
+     * Frame-accurate liquid proximity at an EXACT reconstructed position.
+     * Scans the player's body column (feet→head) plus the four cardinal
+     * neighbours at body height, so a waterfall the player is swimming up —
+     * water in their own column OR in the adjacent column they're pressed
+     * against — is detected even when the once-per-tick live {@code isInWater}
+     * flag has flickered off at the water's edge. Flowing water shares
+     * {@link Material#WATER} with source, so both are covered.
+     */
+    public static boolean nearLiquidAt(org.bukkit.World w, double x, double y, double z) {
+        if (w == null) return false;
+        int bx = (int) Math.floor(x), bz = (int) Math.floor(z);
+        for (double oy : new double[]{-0.1, 0.0, 0.9, 1.7}) {
+            if (isLiquid(w.getBlockAt(bx, (int) Math.floor(y + oy), bz).getType())) return true;
+        }
+        int by = (int) Math.floor(y + 0.9);
+        return isLiquid(w.getBlockAt(bx + 1, by, bz).getType())
+            || isLiquid(w.getBlockAt(bx - 1, by, bz).getType())
+            || isLiquid(w.getBlockAt(bx, by, bz + 1).getType())
+            || isLiquid(w.getBlockAt(bx, by, bz - 1).getType());
+    }
+
+    /**
      * Blocks that override vanilla velocity in ways the simulator does not
      * model (cobweb multiplies motion by ~0.25/0.05, powder snow / berry bush /
      * honey / scaffolding all clamp it). Prediction must skip while the player
