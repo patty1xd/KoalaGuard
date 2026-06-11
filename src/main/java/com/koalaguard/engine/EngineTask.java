@@ -281,7 +281,13 @@ public final class EngineTask extends BukkitRunnable {
             }
             plugin.getSetbackManager().markValid(d, player, f.simGround || near);
             if (d.setbackPending) {
-                s.intake.clear();
+                // Do NOT clear the intake here. This was the last surviving
+                // blanket-clear: it deleted every queued aux packet (attacks,
+                // totem moves, clicks) behind the frame that triggered the
+                // setback — re-blinding AutoTotem / InventoryChain /
+                // BadPacketsDuplicate after every rubber-band. Just abort the
+                // batch; next tick's setbackPending branch selectively drops
+                // MOVEMENT packets and preserves the aux stream.
                 return true;
             }
         }

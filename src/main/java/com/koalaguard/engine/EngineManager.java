@@ -39,13 +39,17 @@ import com.koalaguard.engine.checks.movement.ClickTpCheck;
 import com.koalaguard.engine.checks.movement.ClipCheck;
 import com.koalaguard.engine.checks.movement.ElytraFlyCheck;
 import com.koalaguard.engine.checks.movement.FastClimbCheck;
+import com.koalaguard.engine.checks.movement.GroundSpoofCheck;
+import com.koalaguard.engine.checks.movement.InputSanityCheck;
 import com.koalaguard.engine.checks.movement.JesusCheck;
 import com.koalaguard.engine.checks.movement.NoFallCheck;
 import com.koalaguard.engine.checks.movement.NoSlowCheck;
 import com.koalaguard.engine.checks.movement.PhaseCheck;
 import com.koalaguard.engine.checks.movement.PredictionCheck;
 import com.koalaguard.engine.checks.movement.SpiderCheck;
+import com.koalaguard.engine.checks.movement.TimerCheck;
 import com.koalaguard.engine.checks.movement.VehicleFlyCheck;
+import com.koalaguard.engine.checks.player.BadPacketsSanity;
 import com.koalaguard.engine.checks.player.CheatClientCheck;
 import com.koalaguard.engine.checks.player.InventoryActionCheck;
 import com.koalaguard.engine.checks.player.MultiTaskCheck;
@@ -95,6 +99,13 @@ public final class EngineManager {
         add(new SpiderCheck(plugin));
         add(new ElytraFlyCheck(plugin));
         add(new VehicleFlyCheck(plugin));
+        add(new TimerCheck(plugin));
+        add(new GroundSpoofCheck(plugin));
+        add(new InputSanityCheck(plugin));
+
+        // ── Packet sanity: protocol-illegal values rejected at netty,
+        //    reported here ──
+        add(new BadPacketsSanity(plugin));
 
         // ── Combat: reconstructed-position raytrace + aim plausibility ──
         add(new ReachCheck(plugin));
