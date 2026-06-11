@@ -68,6 +68,17 @@ public final class AirPlaceCheck extends SimCheck {
             return;
         }
 
+        // Ghost-block grace: after a teleport / setback / knockback the client
+        // and server world views diverge for a moment (client may still see a
+        // block the server already removed, or vice versa). A place packet sent
+        // against a client-side ghost block reads as "clicked face is AIR" here
+        // and false-flagged. Genuine air-placers flag again seconds later.
+        long nowMs = System.currentTimeMillis();
+        if (nowMs - ctx.data.lastTeleportMs < cfgL("teleport-grace-ms", 2000L)
+                || nowMs - ctx.data.lastVelocityMs < cfgL("velocity-grace-ms", 1000L)) {
+            return;
+        }
+
         UUID id = ctx.data.getUuid();
         long last = seen.getOrDefault(id, Long.MIN_VALUE);
         long max = last;
@@ -123,11 +134,31 @@ public final class AirPlaceCheck extends SimCheck {
             // "AirPlace". Air is the only case the cheat forges.
             if (!clicked.getType().isAir()) continue;
 
+            // OTHER-ACTOR break race: the dig-grace above only covers the
+            // placer's OWN digging packets. In crystal PvP / team mining the
+            // clicked block is constantly being removed by OTHER players,
+            // explosions and pistons in the same instant — the place packet
+            // was legitimate when sent, but the world read here sees AIR.
+            // Discriminator: a desync race happens INSIDE structure (the
+            // clicked position still touches solid neighbors); a genuinely
+            // forged air-place floats with nothing adjacent. Skip the
+            // structure-adjacent case — Wurst/Meteor AirPlace in open air is
+            // still caught, and ScaffoldCheck owns the bridging variants.
+            boolean touchesSolid =
+                       com.koalaguard.engine.sim.CollisionEngine.collidable(w.getBlockAt(bx + 1, by, bz))
+                    || com.koalaguard.engine.sim.CollisionEngine.collidable(w.getBlockAt(bx - 1, by, bz))
+                    || com.koalaguard.engine.sim.CollisionEngine.collidable(w.getBlockAt(bx, by + 1, bz))
+                    || com.koalaguard.engine.sim.CollisionEngine.collidable(w.getBlockAt(bx, by - 1, bz))
+                    || com.koalaguard.engine.sim.CollisionEngine.collidable(w.getBlockAt(bx, by, bz + 1))
+                    || com.koalaguard.engine.sim.CollisionEngine.collidable(w.getBlockAt(bx, by, bz - 1));
+            if (touchesSolid) continue;
+
             // Forged face: the clicked block is actual AIR (nothing to click
-            // against). Confirm on streak — a single packet in a chunk-reload
-            // race shouldn't flag, but a sustained sequence is conclusive.
+            // against) AND nothing solid touches it. Confirm on streak — a
+            // single packet in a chunk-reload race shouldn't flag, but a
+            // sustained sequence is conclusive.
             if (diverge(ctx, cfgD("score", 5.0), cfgD("threshold", 9.0),
-                    cfgI("min-streak", 2),
+                    cfgI("min-streak", 3),
                     String.format("place @%d,%d,%d clicked face is AIR (air-place)",
                             bx, by, bz), false)) {
                 // No combat-cancel needed; placement is the harm. Rolling back
