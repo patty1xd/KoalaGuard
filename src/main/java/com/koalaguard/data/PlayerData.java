@@ -45,7 +45,14 @@ public final class PlayerData {
 
     // ───────────────── client identity ─────────────────
     public volatile String clientBrand = "vanilla";
-    public volatile String packetBrand = "vanilla";
+    /** Brand as actually RECEIVED via minecraft:brand. Starts empty — "" means
+     *  "never sent one", which the (config-gated, default-off) empty-brand
+     *  evasion rule in BadPacketsBrand keys on. The previous "vanilla" default
+     *  made that rule dead code: the field could never read as missing. */
+    public volatile String packetBrand = "";
+    /** Empty-brand evasion already reported for this join (flag once, not
+     *  once per cooldown forever). */
+    public volatile boolean emptyBrandFlagged;
     public volatile boolean flagBadBrand;
     /** A known cheat-client plugin channel was registered/used (Layer 1). */
     public volatile boolean flagBadChannel;
@@ -71,6 +78,14 @@ public final class PlayerData {
      *  PacketCaptureListener, consumed by ClickTpCheck. */
     public volatile long clickTpBurstSeq;
     public volatile int  clickTpBurstSize;
+
+    /** Protocol-illegal movement packet (NaN/Infinity coordinates or rotation,
+     *  out-of-range pitch, coordinate past the vanilla world limit). The packet
+     *  itself is CANCELLED on the netty thread — Mojang's handler never sees
+     *  it — and this stamp is consumed by BadPacketsSanity on the main thread.
+     *  A vanilla client cannot emit any of these, so the flag is conclusive. */
+    public volatile long sanitySeq;
+    public volatile String sanityDetail = "";
 
     // ───────────────── transaction / tick clock ─────────────────
     /** transaction id -> send nanoTime, pending until the client echoes Pong. */
@@ -109,15 +124,6 @@ public final class PlayerData {
      *  during the same tick (blink burst, backstab return) cannot immediately
      *  undo the rubber-band before Mojang's processor sees them. */
     public volatile long movementCancelUntilMs;
-
-    /** Consecutive DISTINCT velocity events that granted AirJump exemption.
-     *  Counts unique knockback events (not ticks) so a single legitimate
-     *  knockback float never escalates; only a client spamming forged
-     *  velocity packets to keep the exemption alive does. */
-    public volatile int airJumpVelExemptStreak;
-    /** The lastVelocityMs value the AirJump streak last counted, so each
-     *  knockback event is counted exactly once. */
-    public volatile long airJumpLastVelMs;
 
     /** Raw netty-thread byte / packet-id stats, populated by the
      *  {@link com.koalaguard.engine.netty.RawPacketSniffer} channel handler.
