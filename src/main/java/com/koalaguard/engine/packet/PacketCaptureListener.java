@@ -59,6 +59,50 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 || type == PacketType.Play.Client.PLAYER_ROTATION
                 || type == PacketType.Play.Client.PLAYER_POSITION_AND_ROTATION) {
             WrapperPlayClientPlayerFlying w = new WrapperPlayClientPlayerFlying(event);
+
+            // Client-clock accounting for TimerCheck: counted BEFORE any
+            // sanity/cancel logic — the rate of what the client SENT is the
+            // signal, regardless of what the pipeline later does with it.
+            s.movePacketCount.incrementAndGet();
+
+            // ── Protocol sanity — reject what a vanilla client cannot emit ──
+            // NaN/Infinity coordinates or rotation feed straight into server
+            // AABB/raytrace math (crash/exploit packets); |pitch| beyond ±90
+            // is the derp/illegal-rotation fingerprint (vanilla clamps before
+            // send); coordinates past ±3.0e7 are beyond the hard world limit.
+            // The packet is cancelled HERE so Mojang's handler never sees it,
+            // and the stamp is consumed by BadPacketsSanity on the main
+            // thread. Yaw is deliberately NOT range-checked: the vanilla
+            // client accumulates yaw unbounded (spinning passes ±360°) — only
+            // non-finite yaw is illegal.
+            String illegal = null;
+            if (w.hasPositionChanged()) {
+                var pos = w.getLocation().getPosition();
+                double px = pos.getX(), py = pos.getY(), pz = pos.getZ();
+                if (!Double.isFinite(px) || !Double.isFinite(py) || !Double.isFinite(pz)) {
+                    illegal = "non-finite position";
+                } else if (Math.abs(px) > 3.0E7 || Math.abs(pz) > 3.0E7
+                        || Math.abs(py) > 2.0E7) {
+                    illegal = String.format("position out of world bounds (%.3g %.3g %.3g)",
+                            px, py, pz);
+                }
+            }
+            if (illegal == null && w.hasRotationChanged()) {
+                float ryaw = w.getLocation().getYaw();
+                float rpitch = w.getLocation().getPitch();
+                if (!Float.isFinite(ryaw) || !Float.isFinite(rpitch)) {
+                    illegal = "non-finite rotation";
+                } else if (Math.abs(rpitch) > 90.01f) {
+                    illegal = String.format("pitch out of range (%.2f)", rpitch);
+                }
+            }
+            if (illegal != null) {
+                event.setCancelled(true);
+                d.sanityDetail = illegal;
+                d.sanitySeq++;
+                return;
+            }
+
             // Movement-cancel window (set right after a setback): drop the
             // position component so cheat packets already in the netty pipe
             // cannot immediately undo the rubber-band. Rotation is left to
@@ -268,6 +312,11 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 WrapperPlayClientClickWindow w = new WrapperPlayClientClickWindow(event);
                 p.intA = w.getSlot();       // 45 = off-hand (Meteor target)
                 p.intB = w.getWindowId();   // 0  = player inventory menu
+                // Click type (PICKUP / QUICK_MOVE / DOUBLE_CLICK / ...) — lets
+                // BadPacketsDuplicate tell a literal packet resend (identical
+                // type) from a vanilla double-click gather, which sends two
+                // DIFFERENT-type clicks on the same slot in quick succession.
+                p.strA = String.valueOf(w.getWindowClickType());
             } catch (Throwable ignored) { }
             offer(s, p);
             if (replay != null) {
@@ -281,6 +330,45 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
         if (type == PacketType.Play.Client.CLOSE_WINDOW) {
             offer(s, new CapturedPacket(seq.getAndIncrement(), PacketKind.CLOSE_WINDOW, nanos));
             if (replay != null) replay.record(uuid, new ReplayFrame(nanos, ReplayKind.INV_CLOSE));
+            return;
+        }
+
+        if (type == PacketType.Play.Client.PLAYER_INPUT) {
+            // 1.21.2+ keyboard state — sent by the client whenever the input
+            // bitfield CHANGES. Decode is best-effort (wrapper signatures are
+            // version-sensitive); on failure nothing is captured and every
+            // input-gated check stays dormant for the session.
+            try {
+                var w = new com.github.retrooper.packetevents.wrapper.play.client
+                        .WrapperPlayClientPlayerInput(event);
+                int mask = 0;
+                if (w.isForward())  mask |= 1;
+                if (w.isBackward()) mask |= 2;
+                if (w.isLeft())     mask |= 4;
+                if (w.isRight())    mask |= 8;
+                if (w.isJump())     mask |= 16;
+                if (w.isShift())    mask |= 32;
+                if (w.isSprint())   mask |= 64;
+                s.inputMask = mask;
+                s.inputSeen = true;
+                s.lastInputNanos = nanos;
+                CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.PLAYER_INPUT, nanos);
+                p.intA = mask;
+                offer(s, p);
+            } catch (Throwable ignored) { }
+            return;
+        }
+
+        if (type == PacketType.Play.Client.TELEPORT_CONFIRM) {
+            // Pearl/teleport accept sequence — logged so burst / double-accept
+            // fingerprints can be read off the unified stream.
+            CapturedPacket p = new CapturedPacket(seq.getAndIncrement(), PacketKind.TELEPORT_CONFIRM, nanos);
+            try {
+                var w = new com.github.retrooper.packetevents.wrapper.play.client
+                        .WrapperPlayClientTeleportConfirm(event);
+                p.intA = w.getTeleportId();
+            } catch (Throwable ignored) { }
+            offer(s, p);
             return;
         }
 
@@ -310,7 +398,10 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
 
                 if (lcCh.equals("minecraft:brand") || lcCh.equals("mc|brand")) {
                     if (data != null && data.length > 0) {
-                        String brand = new String(data, StandardCharsets.UTF_8)
+                        // Netty-thread DoS cap (CWE-400): a real brand is tens
+                        // of bytes; never decode + regex more than 256.
+                        int blen = Math.min(data.length, 256);
+                        String brand = new String(data, 0, blen, StandardCharsets.UTF_8)
                                 .replaceAll("[^\\x20-\\x7E]", "").trim();
                         if (!brand.isEmpty()) {
                             d.packetBrand = brand;
@@ -349,9 +440,17 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
                 } else if ((lcCh.equals("minecraft:register") || lcCh.equals("register"))
                         && data != null && data.length > 0) {
                     // Payload is a list of channel names being registered
-                    // (NUL/space separated). contains() over the whole blob is
+                    // (NUL/space separated). contains() over the blob is
                     // enough — separators do not matter for a substring match.
-                    String reg = new String(data, StandardCharsets.UTF_8).toLowerCase();
+                    // Netty-thread DoS cap (CWE-400): a flooded 32 KiB payload
+                    // × ~45 cheat ids × 14 loader channels was an O(n·k)
+                    // amplification on the hot path. 8 KiB is far beyond any
+                    // legitimate register list (even heavy modpacks ≈ 2-3 KiB);
+                    // a cheat channel hiding past the cap is caught the next
+                    // time it actually TALKS on that channel (the matchCheat
+                    // on lcCh above has no payload involved).
+                    int rlen = Math.min(data.length, 8192);
+                    String reg = new String(data, 0, rlen, StandardCharsets.UTF_8).toLowerCase();
                     String regHit = matchCheat(reg);
                     if (regHit != null) {
                         d.flagBadChannel = true;
@@ -385,9 +484,14 @@ public final class PacketCaptureListener extends PacketListenerAbstract {
             "nodus", "huzuni", "flux-client", "vapeclient", "vape-client",
             "entropy-client", "raven-b4",
             // 2026 additions — observed brand/channel strings across paid +
-            // free clients. Substring match, so e.g. "lambda" catches every
-            // KAMI fork that kept the namespace.
-            "skidbounce", "opai-client", "opaiclient", "lambda-client", "lambda",
+            // free clients. Substring match — so every entry must be specific
+            // enough to never appear inside a LEGIT mod's channel id. Bare
+            // "lambda" was removed: it substring-matched LambdaControls /
+            // LambdaBetterGrass ("lambdacontrols:...") — legitimate, popular
+            // Fabric mods by LambdAurora — and branded their users cheaters.
+            // The KAMI-fork cheat namespace is still covered by
+            // "lambda-client" / "kamiblue" / "kami-blue".
+            "skidbounce", "opai-client", "opaiclient", "lambda-client",
             "sentience", "lifeware", "jello-client", "holyworld",
             "dolphin-client", "polar-client", "sigma5", "sigma-5",
             "fdp-client", "fdpclient", "cresent", "matrix-client",
