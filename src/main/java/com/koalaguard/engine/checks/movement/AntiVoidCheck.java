@@ -28,10 +28,19 @@ public final class AntiVoidCheck extends SimCheck {
     public void onTick(CheckContext ctx) {
         PositionFrame f = ctx.state.current;
         if (f == null) return;
+        // Waterfall grace: swimming up flowing water against a wall holds dy
+        // near zero with no ground for many blocks below — which reads exactly
+        // like a void-hover. The live exLiquid flag flickers off at the water's
+        // edge, so also honour a frame-accurate liquid test plus a short
+        // trailing grace.
+        boolean liquidGrace = ctx.state.exLiquid
+                || ctx.state.tick - ctx.state.lastLiquidTick < cfgI("liquid-grace-ticks", 20)
+                || com.koalaguard.util.LocationUtil.nearLiquidAt(
+                        ctx.player.getWorld(), f.x, f.y, f.z);
         if (ctx.unstable() || ctx.state.exFlying || ctx.state.exGliding
                 || ctx.state.exVehicle || ctx.state.exLevitation
                 || ctx.state.exRiptide || ctx.state.exSlowFalling
-                || ctx.state.exClimbing || ctx.state.exWeb || ctx.state.exLiquid) {
+                || ctx.state.exClimbing || ctx.state.exWeb || liquidGrace) {
             clean(ctx, 1.0);
             return;
         }

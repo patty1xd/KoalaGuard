@@ -47,24 +47,21 @@ public final class AirJumpCheck extends SimCheck {
                 || s.tick - s.lastSpecialBlockTick < 12;
         if (otherGrace) { return; }
 
-        // Velocity (knockback) grace, rate-limited to defeat forged-kb spam.
-        // The streak counts DISTINCT velocity events (a knockback float lasts
-        // ~1200ms ≈ 24 ticks but is ONE event), so a legitimate fight never
-        // escalates; only a client that keeps emitting NEW velocity packets
-        // to hold the exemption open does. After max-exempt distinct events
-        // with no clean gap, the velocity grace stops applying.
+        // Velocity (knockback) grace — honored UNCONDITIONALLY.
+        //
+        // The previous "anti forged-kb spam" escalation (stop honoring the
+        // grace after max-exempt-streak distinct velocity events) was built on
+        // a false premise: ENTITY_VELOCITY is a SERVER→CLIENT packet stamped
+        // by our own listener from server-side knockback. A cheat client
+        // cannot emit or forge it. The only way to accumulate velocity events
+        // is to genuinely get hit — and a player who is genuinely being hit
+        // is exactly the player whose upward dy is legitimate knockback.
+        // The escalation therefore fired ONLY on legit players in sustained
+        // fights (9+ hits without a 1.2 s gap — i.e. every real combo), then
+        // flagged + SET BACK the victim mid-combo. That was the reported
+        // AirJump false positive. Window kept at 1200 ms (kb decay length).
         boolean velExempt = now - ctx.data.lastVelocityMs < 1200;
-        int maxExempt = cfgI("max-exempt-streak", 8);
-        if (velExempt) {
-            if (ctx.data.airJumpLastVelMs != ctx.data.lastVelocityMs) {
-                ctx.data.airJumpLastVelMs = ctx.data.lastVelocityMs;
-                ctx.data.airJumpVelExemptStreak++;
-            }
-            if (ctx.data.airJumpVelExemptStreak <= maxExempt) return;  // honor grace
-            // else: spam detected — fall through to detection.
-        } else {
-            ctx.data.airJumpVelExemptStreak = 0;
-        }
+        if (velExempt) return;
 
         // Detection-restored: streak=1, impulse=0.36, airTicks=4 — but with a
         // stricter "really airborne" double-check: NONE of the last 4 frames
