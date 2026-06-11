@@ -151,15 +151,47 @@ public final class BanManager {
             JsonElement el = JsonParser.parseReader(r);
             return el.isJsonObject() ? el.getAsJsonObject() : new JsonObject();
         } catch (Exception e) {
-            plugin.getLogger().warning("Failed to load bans.json: " + e.getMessage());
+            // CWE-732 fix: do NOT silently continue with an empty map — the
+            // next saveAsync() would overwrite bans.json and permanently wipe
+            // every ban because of one truncated read (crash mid-write on the
+            // old non-atomic saver). Preserve the unreadable file for manual
+            // recovery and scream in the log.
+            File corrupt = new File(bansFile.getParentFile(),
+                    "bans.json.corrupt-" + System.currentTimeMillis());
+            boolean moved = bansFile.renameTo(corrupt);
+            plugin.getLogger().severe("bans.json is unreadable (" + e.getMessage()
+                    + "). " + (moved
+                        ? "Preserved as " + corrupt.getName() + " — restore it manually to recover bans."
+                        : "ALSO FAILED to preserve a copy — do not delete bans.json!"));
             return new JsonObject();
         }
     }
 
     private void saveAsync() {
+        // Serialize on the CALLING (main) thread — bansData is mutated on the
+        // main thread, and gson.toJson on the async thread raced those
+        // mutations (ConcurrentModificationException → truncated file).
+        final String json = gson.toJson(bansData);
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try (Writer w = new FileWriter(bansFile)) { gson.toJson(bansData, w); }
-            catch (Exception e) { plugin.getLogger().warning("Failed to save bans.json: " + e.getMessage()); }
+            // Atomic write: temp file in the same directory, then move over
+            // the live file. A crash mid-write leaves the OLD intact file in
+            // place instead of a truncated bans.json.
+            File tmp = new File(bansFile.getParentFile(), "bans.json.tmp");
+            try {
+                try (Writer w = new FileWriter(tmp, java.nio.charset.StandardCharsets.UTF_8)) {
+                    w.write(json);
+                }
+                try {
+                    java.nio.file.Files.move(tmp.toPath(), bansFile.toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException amns) {
+                    java.nio.file.Files.move(tmp.toPath(), bansFile.toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (Exception e) {
+                plugin.getLogger().warning("Failed to save bans.json: " + e.getMessage());
+            }
         });
     }
 }
