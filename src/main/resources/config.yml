@@ -106,6 +106,9 @@ checks:
     score-per-tick: 6.0
     threshold: 14.0
     min-streak: 3
+    # Exempt while in / just-left water: clearing the top of a water elevator
+    # with high upward momentum briefly clips the body box into the lip block.
+    liquid-grace-ticks: 20
 
   nofall:
     enabled: true
@@ -164,6 +167,11 @@ checks:
     score: 12.0
     threshold: 9.0
     min-streak: 1
+    # 2026-06-11: the velocity (knockback) grace is now honored
+    # unconditionally. ENTITY_VELOCITY is server→client — a cheat cannot
+    # forge it — so the old "stop honoring after 8 knockbacks" escalation
+    # only ever fired on legit players being comboed (then set them back
+    # mid-fight). That was the reported AirJump false positive.
 
   # NoSlow — COBWEB-ONLY. Vanilla freezes the player inside a cobweb
   # (≲0.05 b/t); cheat moves at normal speed. Only fires when the player
@@ -180,6 +188,63 @@ checks:
     score-scale: 50.0
     threshold: 9.0
     min-streak: 4
+
+  # Timer — the client clock runs faster than real time (everything speeds
+  # up while each packet still looks vanilla). Vanilla emits exactly ONE
+  # movement-class packet per client tick, so the balance of (packets
+  # received − packets allowed by elapsed wall time) can only climb positive
+  # if the client manufactures ticks. TCP stalls go negative then catch back
+  # to ~zero, never above; debt-floor caps how much credit a stall can bank
+  # (so a lag-switch can't pre-fund a timer burst); max-balance 25 = the
+  # client got 1.25 s ahead of reality — no transport artifact survives that.
+  timer:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    max-balance: 25.0
+    debt-floor: -90.0
+    rate-tolerance: 1.005
+    score: 5.0
+    threshold: 9.0
+    min-streak: 3
+
+  # GroundSpoof — client claims onGround on a frame with NO supporting
+  # geometry (the raw flag NoFall/Criticals bypasses keep permanently set).
+  # NoFall only fires once a damaging fall is in progress; this catches the
+  # lie itself. Entity floors (boats/shulkers) are probed and exempt, ghost
+  # blocks are covered by the teleport/velocity graces, and confirmation
+  # needs a sustained run of spoofed frames (a NoFall module asserts ground
+  # EVERY airborne tick; a one-off desync doesn't).
+  groundspoof:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    teleport-grace-ms: 2000
+    velocity-grace-ms: 1000
+    score: 4.0
+    threshold: 12.0
+    min-streak: 5
+
+  # InputSanity — sprint must obey vanilla input rules, read from the
+  # 1.21.2+ PLAYER_INPUT keyboard bitfield. Rule 1: sustained sprint at
+  # speed with no forward key held = omni-sprint (gated on the client
+  # actually sending PLAYER_INPUT, so ViaVersion pre-1.21.2 clients are
+  # never evaluated). Rule 2: sustained sprint under blindness. Long streaks
+  # absorb the 1-2 tick input→STOP_SPRINTING lag and momentum frames.
+  inputsanity:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    min-speed: 0.15
+    liquid-grace-ticks: 20
+    score: 3.0
+    blind-score: 3.0
+    threshold: 12.0
+    min-streak: 8
+    blind-min-streak: 10
 
   # ── COMBAT (reconstructed-position raytrace + aim) ──
   # Lag-compensated: takes the SMALLEST eye→hitbox distance over the victim's
@@ -262,15 +327,16 @@ checks:
     # Reversal rule: was 0.18 against / 0.18 expected — counter-sprint W-tap PvP
     # legitimately nets ~0.20 against-kb motion once friction overtakes the
     # impulse. 0.35 keeps the rule for real reversal cheats only.
+    # Reversal variant — the player moves AGAINST the knockback direction.
+    # Signed-projection catch (scalar speed would still look healthy).
+    # NOTE: these keys were duplicated further down with the OLD 0.18 value;
+    # YAML last-key-wins meant the documented 0.35 FP fix was silently
+    # overridden. Duplicates removed 2026-06-11 (second pass).
     max-against: 0.35
     reversal-score: 8.0
     score-scale: 22.0
     threshold: 9.0
     min-streak: 3
-    # Reversal variant — the player moves AGAINST the knockback direction.
-    # Signed-projection catch (scalar speed would still look healthy).
-    max-against: 0.18
-    reversal-score: 8.0
 
   # Not a CPS limit — measures inhuman REGULARITY of attack intervals.
   autoclicker:
@@ -334,23 +400,119 @@ checks:
   # hand never stops being a totem ⇒ no cycle is ever built ⇒ FP-proof.
 
   # BadPackets B — client brand advertises autototem (client outs itself).
-  badpacketsbrand: { enabled: true, max-violations: 6, punishment: kick, ban-duration: 30d, score: 12.0, threshold: 9.0, min-streak: 1 }
-  # BadPackets C — identical slot-click packet resent within a few ms.
-  badpacketsdup:   { enabled: true, max-violations: 3, punishment: kick, ban-duration: 30d, score: 4.0, threshold: 6.0, min-streak: 2, max-gap-ms: 5 }
+  # empty-brand-enabled (default OFF): "never sent a brand = evasion" is only
+  # sound on a proxy-free, Java-only server. Geyser/Floodgate (Bedrock)
+  # players never send minecraft:brand and several proxies strip it — with
+  # this on they get flagged. Even when enabled it now flags ONCE per join.
+  badpacketsbrand:
+    enabled: true
+    max-violations: 6
+    punishment: kick
+    ban-duration: 30d
+    score: 12.0
+    threshold: 9.0
+    min-streak: 1
+    empty-brand-enabled: false
+    brand-grace-ms: 15000
+  # BadPackets C — identical slot-click packet resent back-to-back.
+  # 2026-06-11 FP hardening: a duplicate now requires ADJACENT capture seq
+  # (nothing between the pair — TCP/lag flushes collapse recv-gaps of LEGIT
+  # packets to ~0ms, but they interleave movement packets), identical click
+  # TYPE (vanilla double-click gather = PICKUP→DOUBLE_CLICK on same slot),
+  # and tighter gaps (2ms clicks / 3ms attacks — below mouse debounce).
+  # attack-dup also needs 2 confirmations: tickIndex is the RECONSTRUCTED
+  # movement tick and a 20+ CPS butterfly clicker can land 2 clicks in one.
+  badpacketsdup:
+    enabled: true
+    max-violations: 3
+    punishment: kick
+    ban-duration: 30d
+    score: 4.0
+    threshold: 6.0
+    min-streak: 2
+    max-gap-ms: 2
+    attack-dup-gap-ms: 3
+    attack-dup-min-streak: 2
   # Type A — impossibly fast select→offhand / pop→equip.
   # AutoTotemA — burstSize<=1 cycles are now skipped (legit F-swap of a totem
   # main→offhand is one packet ~80ms after a pop, which used to FP).
-  autototema:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, max-ms: 90.0, max-cycle-ms: 110.0, score: 7.0, threshold: 9.0, min-streak: 3 }
+  autototema:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    max-ms: 90.0
+    max-cycle-ms: 110.0
+    score: 7.0
+    threshold: 9.0
+    min-streak: 3
+
   # Type B — unnaturally low std-dev of re-equip timings.
-  autototemb:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, sample-cap: 20, min-samples: 5, max-sd-ms: 30.0, max-mean-ms: 800.0, score: 8.0, threshold: 10.0, min-streak: 2 }
+  autototemb:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    sample-cap: 20
+    min-samples: 5
+    max-sd-ms: 30.0
+    max-mean-ms: 800.0
+    score: 8.0
+    threshold: 10.0
+    min-streak: 2
+
   # Type C — impossibly consistent std-dev across windows.
-  autototemc:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, window: 5, sample-cap: 40, sd-cap: 20, min-windows: 4, max-sd-of-sd: 8.0, max-mean-sd: 60.0, score: 8.0, threshold: 10.0, min-streak: 2 }
+  autototemc:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    window: 5
+    sample-cap: 40
+    sd-cap: 20
+    min-windows: 4
+    max-sd-of-sd: 8.0
+    max-mean-sd: 60.0
+    score: 8.0
+    threshold: 10.0
+    min-streak: 2
+
   # Type D — replayed identical packet-timing sequence.
-  autototemd:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, sample-cap: 16, min-samples: 4, max-gap-sd-ms: 4.0, score: 9.0, threshold: 9.0, min-streak: 2 }
+  autototemd:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    sample-cap: 16
+    min-samples: 4
+    max-gap-sd-ms: 4.0
+    score: 9.0
+    threshold: 9.0
+    min-streak: 2
+
   # Type E — impossible low timing outlier (faked randomisation).
-  autototeme:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, sample-cap: 30, min-samples: 8, max-low-ms: 70.0, outlier-z: 2.5, score: 7.0, threshold: 9.0, min-streak: 2 }
+  autototeme:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    sample-cap: 30
+    min-samples: 8
+    max-low-ms: 70.0
+    outlier-z: 2.5
+    score: 7.0
+    threshold: 9.0
+    min-streak: 2
+
   # Type F — totem moved while interacting with the world (screen not open).
-  autototemf:      { enabled: true, max-violations: 8, punishment: kick, ban-duration: 30d, score: 5.0, threshold: 10.0, min-streak: 3 }
+  autototemf:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    score: 5.0
+    threshold: 10.0
+    min-streak: 3
 
   # ── Additional movement checks ──
   # ClickTp:
@@ -361,7 +523,27 @@ checks:
   #          packets with no pos/no rot within <40ms each (the decoy burst the
   #          cheat sends BEFORE the big position packet). Fires early, so the
   #          rubber-band lands before the teleport even completes.
-  clicktp:      { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, max-horizontal: 1.2, max-vertical: 1.5, score: 12.0, threshold: 10.0, min-streak: 1, big-score: 20.0, big-min-streak: 1, burst-score: 18.0, burst-min-streak: 1 }
+  # Vertical is gravity-aware: free-fall caps at terminal (~3.92 b/t), so a
+  # long drop (e.g. off a tall water platform) reaches large negative dy
+  # legitimately. max-vertical-down only flags ABOVE terminal; max-vertical-up
+  # catches launches/warps. liquid-grace covers water-elevator launches.
+  clicktp:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    max-horizontal: 1.2
+    max-vertical-up: 1.5
+    max-vertical-down: 4.5
+    max-window-v: 18.0
+    liquid-grace-ticks: 20
+    score: 12.0
+    threshold: 10.0
+    min-streak: 1
+    big-score: 20.0
+    big-min-streak: 1
+    burst-score: 18.0
+    burst-min-streak: 1
   # Clip / phase-teleport — Meteor .vclip/.hclip/.tp & anything moving THROUGH
   # solid with no server teleport. Evaluated before the >8 reset that used to
   # discard it. Conclusive → confirms immediately + rubber-bands.
@@ -369,22 +551,70 @@ checks:
   # path actually contains a solid block) and waiting for a 2nd event means
   # the first wall-phase ClickTp slips before rubber-band. False positives
   # from upstream ray-test would only matter if solidOnSegment had bugs.
-  clip:         { enabled: true, max-violations: 6,  punishment: kick, ban-duration: 30d, min-dist: 1.0, score: 15.0, threshold: 9.0, min-streak: 1 }
+  clip:
+    enabled: true
+    max-violations: 6
+    punishment: kick
+    ban-duration: 30d
+    min-dist: 1.0
+    score: 15.0
+    threshold: 9.0
+    min-streak: 1
   # ClickTp PATH-B (big-score/big-min-streak) handles the >8-block free-air
   # teleport that the engine baseline-reset would otherwise eat — fires on
   # the first stamped clickTpSeq, no streak.
-  blink:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-frames-per-tick: 9, score-scale: 3.0, threshold: 9.0, min-streak: 2 }
+  blink:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    max-frames-per-tick: 9
+    score-scale: 3.0
+    threshold: 9.0
+    min-streak: 2
   # Jesus + Dolphin/BounceJesus variant (accumulated descent over recent
   # frames stays near zero — vanilla swim continually sinks between strokes,
   # bouncer never goes below the surface).
-  jesus:        { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-dy: 0.12, min-speed: 0.08, score: 5.0, threshold: 12.0, min-streak: 6, dolphin-scan: 16, dolphin-max-descent: 0.40, dolphin-score: 4.0, dolphin-min-streak: 4 }
+  jesus:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    max-dy: 0.12
+    min-speed: 0.08
+    score: 5.0
+    threshold: 12.0
+    min-streak: 6
+    dolphin-scan: 16
+    dolphin-max-descent: 0.40
+    dolphin-score: 4.0
+    dolphin-min-streak: 4
   # SpiderCheck — min-up raised 0.02→0.10 and min-air-ticks 4→8 so corner /
   # doorway jumps don't FP on the upward half of a normal sprint-jump.
   # liquid-grace-ticks: waterfall-climb FP guard — swimming up flowing water
   # against a wall gains height pressed to a wall, which looks like wall-climb.
-  spider:       { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, min-up: 0.10, min-air-ticks: 8, liquid-grace-ticks: 20, score: 5.0, threshold: 10.0, min-streak: 5 }
+  spider:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    min-up: 0.10
+    min-air-ticks: 8
+    liquid-grace-ticks: 20
+    score: 5.0
+    threshold: 10.0
+    min-streak: 5
   # Disabled by default — proper elytra detection needs full glide physics.
-  elytrafly:    { enabled: false, max-violations: 10, punishment: kick, ban-duration: 14d, min-climb-dy: 0.15, rocket-window-ms: 3000, score: 3.0, threshold: 12.0, min-streak: 25 }
+  elytrafly:
+    enabled: false
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    min-climb-dy: 0.15
+    rocket-window-ms: 3000
+    score: 3.0
+    threshold: 12.0
+    min-streak: 25
 
   # ══ Aim family — KillAura split into independent, FP-tuned checks ═
   # Each is ONE signal in its OWN file/buffer/alert. The old monolithic
@@ -392,30 +622,130 @@ checks:
   # position desync (~15-25°). These either use desync-proof margins (aima),
   # need no victim position (aimd), or are conservative & off by default (aime).
   # aimA — hit far outside field of view (no-rotate / rage / backtrack aura).
-  aima:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, max-fov-deg: 80.0, score: 6.0, threshold: 8.0, min-streak: 3 }
+  aima:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: permanent
+    max-fov-deg: 80.0
+    score: 6.0
+    threshold: 8.0
+    min-streak: 3
+
   # aimB — attack through a solid block.
-  aimb:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: 30d, min-dist: 1.6, score: 5.0, threshold: 9.0, min-streak: 3 }
+  aimb:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 30d
+    min-dist: 1.6
+    score: 5.0
+    threshold: 9.0
+    min-streak: 3
+
   # aimC — multi-target kill-aura.
-  aimc:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: 30d, window-ns: 500000000, max-targets: 3, score: 5.0, threshold: 9.0, min-streak: 2 }
+  aimc:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 30d
+    window-ns: 500000000
+    max-targets: 3
+    score: 5.0
+    threshold: 9.0
+    min-streak: 2
+
   # aimD — snap onto target then snap back (silent / backtrack aura).
-  aimd:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, return-window-ticks: 4, snap-min-deg: 22.0, lock-cone-deg: 7.0, return-eps-deg: 9.0, score: 7.0, threshold: 9.0, min-streak: 3 }
+  aimd:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: permanent
+    return-window-ticks: 4
+    snap-min-deg: 22.0
+    lock-cone-deg: 7.0
+    return-eps-deg: 9.0
+    score: 7.0
+    threshold: 9.0
+    min-streak: 3
   # aimE — machine-perfect aim lock, LAG-COMPENSATED (victim rewound to the
   # attack nanosecond). The geometric catch for Meteor silent aim. Enabled now
   # that desync is fixed; a human's natural spread (sd >~ 2-4°) clears it.
-  aime:  { enabled: true,  max-violations: 10, punishment: kick, ban-duration: permanent, sample-cap: 40, min-samples: 20, max-mean-deg: 2.5, max-sd-deg: 1.3, score: 7.0, threshold: 10.0, min-streak: 3 }
+  # 2026-06-11: the 800ms damaged / 1000ms knocked-back skip is GONE — in a
+  # real fight both were continuously refreshed, so AimE was blind for whole
+  # engagements (the "aim cheats never detected" report). Neither event
+  # corrupts the measurement (sent rotation vs rewound victim box). Only a
+  # short velocity-grace-ms remains for the fresh-knockback eye shear.
+  aime:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: permanent
+    velocity-grace-ms: 300
+    sample-cap: 40
+    min-samples: 20
+    max-mean-deg: 2.5
+    max-sd-deg: 1.3
+    score: 7.0
+    threshold: 10.0
+    min-streak: 3
   # aimF — sensitivity/GCD quantization collapse. DISABLED BY DEFAULT: series-
   # GCD is genuinely noisy for raw-input / high-DPI players (false-flags them),
   # exactly the caveat in the design notes. Alert-only (never cancels combat).
   # Enable + calibrate min-step-deg from `debug:true` [aimf] logs ONLY after
   # comparing a known-legit player vs the cheat on YOUR server.
-  aimf:  { enabled: false, max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, samples: 200, min-samples: 50, min-active-deg: 0.04, max-active-deg: 30.0, min-turn-sum-deg: 60.0, min-step-deg: 0.05, score: 5.0, pitch-score: 3.0, threshold: 12.0, min-streak: 8 }
+  aimf:
+    enabled: false
+    max-violations: 8
+    punishment: kick
+    ban-duration: permanent
+    combat-window-ns: 1500000000
+    samples: 200
+    min-samples: 50
+    min-active-deg: 0.04
+    max-active-deg: 30.0
+    min-turn-sum-deg: 60.0
+    min-step-deg: 0.05
+    score: 5.0
+    pitch-score: 3.0
+    threshold: 12.0
+    min-streak: 8
   # aimG — unnatural rotation smoothness (no hand tremor). Needs BOTH low
   # jerk-sign-rate AND low entropy, so legit smooth pursuit never confirms.
-  aimg:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, samples: 200, min-samples: 60, min-active-deg: 0.04, max-active-deg: 30.0, min-turn-sum-deg: 80.0, max-jerk-sign-rate: 0.18, max-entropy-bits: 1.6, score: 5.0, threshold: 12.0, min-streak: 8 }
+  aimg:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: permanent
+    combat-window-ns: 1500000000
+    samples: 200
+    min-samples: 60
+    min-active-deg: 0.04
+    max-active-deg: 30.0
+    min-turn-sum-deg: 80.0
+    max-jerk-sign-rate: 0.18
+    max-entropy-bits: 1.6
+    score: 5.0
+    threshold: 12.0
+    min-streak: 8
   # aimH — inhuman target-acquisition reaction (triggerbot / auto-attack on
   # visibility). Lag-comp victim history; only clean acquisitions; flags only
   # when reaction is BOTH too fast AND too consistent over many engagements.
-  aimh:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, engage-gap-ns: 1200000000, reach: 3.2, max-plausible-ms: 2000.0, sample-cap: 24, min-samples: 6, max-mean-ms: 90.0, max-sd-ms: 45.0, score: 7.0, threshold: 10.0, min-streak: 3 }
+  aimh:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: permanent
+    engage-gap-ns: 1200000000
+    reach: 3.2
+    max-plausible-ms: 2000.0
+    sample-cap: 24
+    min-samples: 6
+    max-mean-ms: 90.0
+    max-sd-ms: 45.0
+    score: 7.0
+    threshold: 10.0
+    min-streak: 3
   # aimI — ROTATION-MOVEMENT DESYNC. The strongest server-side catch for
   # Meteor / LiquidBounce silent-aim. Per research: the cheat mutates the
   # outgoing packet's yaw but leaves dx/dz computed from the REAL local yaw,
@@ -427,7 +757,28 @@ checks:
   # vector meaningless while airborne (jumping to crit) or while whipping the
   # camera to track a strafing opponent — those were the false positives.
   # max-yaw-rate-deg: skip a frame whose yaw turned more than this (fast track).
-  aimi:  { enabled: true,  max-violations: 8,  punishment: kick, ban-duration: permanent, combat-window-ns: 1500000000, min-speed: 0.10, max-yaw-rate-deg: 12.0, sample-cap: 60, min-samples: 36, max-mean-residual: 10.0, min-sd-residual: 0.0, score: 6.0, threshold: 11.0, min-streak: 4 }
+  # 2026-06-11 FP hardening: skips ice/slime ground (slipperiness keeps the
+  # velocity pointing the OLD way while the camera turns), skips sustained
+  # orbiting (mean |dYaw| over last 6 frames > max-mean-turn-deg — circle-
+  # strafing makes velocity lag yaw with no cheat), and clears the sample
+  # series after series-gap-ticks without samples (no cross-fight blending).
+  aimi:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: permanent
+    combat-window-ns: 1500000000
+    min-speed: 0.10
+    max-yaw-rate-deg: 12.0
+    max-mean-turn-deg: 3.5
+    series-gap-ticks: 100
+    sample-cap: 60
+    min-samples: 36
+    max-mean-residual: 10.0
+    min-sd-residual: 0.0
+    score: 6.0
+    threshold: 11.0
+    min-streak: 4
 
   # Uses PRECISE simGround + a real-fall exclusion so legit jump/air crits
   # never flag — only a hop that never leaves the ground and never falls.
@@ -437,7 +788,21 @@ checks:
   # variants (NoGround, Packet [Vanilla/NCP/Falling/Low/Down/Grim/BlocksMC],
   # MiniJump, Blink, Timer) at the damage edge — they all need server to
   # believe in a fall, which the engine's collision-truth contradicts.
-  criticals:    { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, window-ticks: 4, min-hop: 0.018, max-hop: 0.15, max-fall: 0.20, score: 4.0, threshold: 10.0, min-streak: 5, cap-score: 8.0, cap-min-streak: 1, cap-frames: 4 }
+  criticals:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    window-ticks: 4
+    min-hop: 0.018
+    max-hop: 0.15
+    max-fall: 0.20
+    score: 4.0
+    threshold: 10.0
+    min-streak: 5
+    cap-score: 8.0
+    cap-min-streak: 1
+    cap-frames: 4
   # Mace smash exploit — server-computed smash damage with no genuine fall.
   # `cap-*` keys surface the HIGHEST-priority HARD CAP that REWRITES the
   # damage event to legit-vanilla using the engine's collision-truth real
@@ -445,7 +810,20 @@ checks:
   # a simGround frame). On flat ground the cap = vanilla base + sharpness
   # margin → cheat literally cannot smash. Legit jump/air smashes pass
   # untouched (real fall is non-zero by collision truth).
-  mace:         { enabled: true, max-violations: 10, punishment: kick, ban-duration: 30d, vanilla-max-damage: 25.0, min-fall-blocks: 1.0, window-ticks: 8, min-fall-dy: 0.25, score: 8.0, threshold: 10.0, min-streak: 2, cap-score: 10.0, cap-min-streak: 1 }
+  mace:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 30d
+    vanilla-max-damage: 25.0
+    min-fall-blocks: 1.0
+    window-ticks: 8
+    min-fall-dy: 0.25
+    score: 8.0
+    threshold: 10.0
+    min-streak: 2
+    cap-score: 10.0
+    cap-min-streak: 1
   # Shield bypass — two variants, both covered:
   #  • Auto axe-swap (Wurst, LB, Meteor's WeaponSwapOptimizer): swap → hit
   #    → swap-back at machine-consistent cadence (low std-dev).
@@ -465,6 +843,12 @@ checks:
     swap-window-ms: 220
     sample-cap: 30
     min-samples: 8
+    # Samples older than this no longer count toward the SD statistic. A real
+    # auto-axe produces a dense cluster every engagement; incidental human
+    # swap-hit-swap triplets (hotbar scrolling has near machine-consistent
+    # wheel-detent timing!) are sparse and now age out instead of slowly
+    # accumulating into a session-long false positive.
+    sample-expiry-ms: 90000
     max-sd-ms: 35.0
     max-mean-ms: 320.0
     score: 7.0
@@ -489,13 +873,48 @@ checks:
   # Honeypot — armCombatCancel now only fires AFTER diverge() actually
   # confirmed (was unconditional → silent combat cancel without a fresh
   # confirmation).
-  honeypot:     { enabled: true, max-violations: 4, punishment: kick, ban-duration: permanent, fake-player: true, combat-radius: 7.0, spawn-distance: 1.6, lifetime-ms: 2500, cooldown-ms: 12000, max-aim-deg: 50.0, score: 20.0, threshold: 9.0, min-streak: 1 }
+  honeypot:
+    enabled: true
+    max-violations: 4
+    punishment: kick
+    ban-duration: permanent
+    fake-player: true
+    combat-radius: 7.0
+    spawn-distance: 1.6
+    lifetime-ms: 2500
+    cooldown-ms: 12000
+    max-aim-deg: 50.0
+    score: 20.0
+    threshold: 9.0
+    min-streak: 1
+
+  # BadPackets S — protocol-illegal movement packets: NaN/Infinity
+  # coordinates or rotation (crash/exploit payloads), |pitch| beyond ±90
+  # (derp), coordinates past the vanilla world limit. The packet itself is
+  # CANCELLED on the netty thread before Mojang's handler ever parses it;
+  # this check is the reporting half. A vanilla client cannot emit any of
+  # these under any network condition — a single occurrence is conclusive.
+  badpacketssanity:
+    enabled: true
+    max-violations: 3
+    punishment: kick
+    ban-duration: 30d
+    score: 20.0
+    threshold: 9.0
+    min-streak: 1
 
   # ── Player / World ──
   # Layer 1 — known cheat-client plugin channel / brand fingerprint. The
   # client outs itself (meteor-client, wurst, liquidbounce, …); vanilla and
   # legit mods never use these. Immediate, ~0 FP.
-  cheatclient:  { enabled: true, max-violations: 1, punishment: kick, ban-duration: permanent, score: 20.0, threshold: 9.0, min-streak: 1 }
+  cheatclient:
+    enabled: true
+    max-violations: 1
+    punishment: kick
+    ban-duration: permanent
+    score: 20.0
+    threshold: 9.0
+    min-streak: 1
   # MultiTask — >=2 actions inside one uninterrupted item-use (eat/block/bow
   # + attack OR + block-place OR + drop). Vanilla cancels use the moment any
   # of these happen, so the use-flag staying open IS the contradiction.
@@ -511,16 +930,50 @@ checks:
   # so a closing use never trips it.
   # Hardened (actions 3→4, streak 2→3, release-grace 200→400ms, sneak-toggles
   # 6→10) so bunched RELEASE_USE_ITEM + same-tick action packets never trip it.
-  multitask:    { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-actions-in-use: 4, use-stale-ms: 30000, use-fresh-ms: 4000, release-grace-ms: 400, max-sneak-toggles-in-use: 10, score: 6.0, threshold: 9.0, min-streak: 3 }
+  multitask:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    max-actions-in-use: 4
+    use-stale-ms: 30000
+    use-fresh-ms: 4000
+    release-grace-ms: 400
+    max-sneak-toggles-in-use: 10
+    score: 6.0
+    threshold: 9.0
+    min-streak: 3
   # Inventory automation: AutoArmor / AutoTool / AutoMend (window-0 cluster
   # OR inv-click coincident with attack) AND ChestStealer / FastStealer /
   # AutoSteal (non-zero window-id burst — vanilla shift-click cap is 1/tick,
   # a stealer fires 10+ in 100ms).
-  inventoryaction: { enabled: true, max-violations: 12, punishment: kick, ban-duration: 7d, cluster-window-ns: 60000000, attack-window-ns: 250000000, chest-burst-window-ns: 250000000, chest-burst-threshold: 6, chest-score-scale: 2.0, cluster-score: 8.0, combat-score: 8.0, threshold: 10.0, min-streak: 3 }
+  inventoryaction:
+    enabled: true
+    max-violations: 12
+    punishment: kick
+    ban-duration: 7d
+    cluster-window-ns: 60000000
+    attack-window-ns: 250000000
+    chest-burst-window-ns: 250000000
+    chest-burst-threshold: 6
+    chest-score-scale: 2.0
+    cluster-score: 8.0
+    combat-score: 8.0
+    threshold: 10.0
+    min-streak: 3
   # MultiPlace — limit raised 3→5 since vanilla 1.9+ allows simultaneous
   # mainhand+offhand placement, and the check now counts DISTINCT block
   # coordinates (not raw packets).
-  multiplace:   { enabled: true, max-violations: 8,  punishment: kick, ban-duration: 30d, window-ns: 70000000, max-places-per-tick: 5, score-scale: 4.0, threshold: 10.0, min-streak: 2 }
+  multiplace:
+    enabled: true
+    max-violations: 8
+    punishment: kick
+    ban-duration: 30d
+    window-ns: 70000000
+    max-places-per-tick: 5
+    score-scale: 4.0
+    threshold: 10.0
+    min-streak: 2
   # Time-aligned to the EXACT place tick + real clicked FACE (not the loose
   # live-eye/block-centre the old version used).
   # Look now comes from the netty-accurate rotation stamped on the place
@@ -535,7 +988,30 @@ checks:
   # identical-rotation places, was effectively requiring 4). Also gates on
   # camera-moved so a stationary player (controller user / AFK tower) sending
   # bit-identical floats doesn't FP.
-  scaffold:     { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, max-angle: 65.0, max-reach: 5.5, aim-score: 5.0, min-move: 0.12, back-dot: -0.30, back-score: 5.0, tower-max-horizontal: 0.10, tower-jump-scan: 8, tower-min-jump: 0.30, tower-score: 4.0, lastrot-streak: 3, lastrot-score: 6.0, sample-cap: 24, min-samples: 10, max-sd-interval: 0.6, max-sd-pitch: 0.8, cadence-score: 4.0, threshold: 11.0, min-streak: 4 }
+  scaffold:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    max-angle: 65.0
+    max-reach: 5.5
+    aim-score: 5.0
+    min-move: 0.12
+    back-dot: -0.30
+    back-score: 5.0
+    tower-max-horizontal: 0.10
+    tower-jump-scan: 8
+    tower-min-jump: 0.30
+    tower-score: 4.0
+    lastrot-streak: 3
+    lastrot-score: 6.0
+    sample-cap: 24
+    min-samples: 10
+    max-sd-interval: 0.6
+    max-sd-pitch: 0.8
+    cadence-score: 4.0
+    threshold: 11.0
+    min-streak: 4
   # AutoWeb — automatic cobweb placement in combat. Data source is the
   # SERVER-AUTHORITATIVE block-place ring (BlockPlaceEvent at MONITOR), NOT
   # the per-tick inventory mirror — a swap-in / place / swap-back cheat
@@ -551,7 +1027,25 @@ checks:
   #   S1 opponent-web — cobweb placed AT (or right against) an enemy's
   #      rewound hitbox.
   # post-attack and machine-cadence only CORROBORATE — never standalone.
-  autoweb:      { enabled: true, max-violations: 10, punishment: kick, ban-duration: 14d, combat-radius: 5.0, self-radius: 1.6, enemy-radius: 1.6, self-min-look-down-pitch: 55.0, self-web-score: 7.0, opponent-web-score: 7.0, combat-score: 5.0, post-attack-window-ns: 400000000, sample-cap: 20, min-samples: 6, max-sd-interval-ms: 35.0, cadence-score: 6.0, threshold: 10.0, min-streak: 2 }
+  autoweb:
+    enabled: true
+    max-violations: 10
+    punishment: kick
+    ban-duration: 14d
+    combat-radius: 5.0
+    self-radius: 1.6
+    enemy-radius: 1.6
+    self-min-look-down-pitch: 55.0
+    self-web-score: 7.0
+    opponent-web-score: 7.0
+    combat-score: 5.0
+    post-attack-window-ns: 400000000
+    sample-cap: 20
+    min-samples: 6
+    max-sd-interval-ms: 35.0
+    cadence-score: 6.0
+    threshold: 10.0
+    min-streak: 2
 
   # ── NEW (2026-05-22) ──
   # VehicleFly / BoatFly — every other movement check exempts `exVehicle`, so
@@ -601,11 +1095,20 @@ checks:
     # special movement block). Cobweb break→replace + web-clamped feet/MLG
     # placements were the "airplace when cobwebs" FP source.
     special-block-grace-ticks: 40
+    # Ghost-block grace after teleports/setbacks and fresh knockback — the
+    # client's world view lags the server's for a moment and a place against
+    # a client-side ghost block reads as "clicked face is AIR".
+    teleport-grace-ms: 2000
+    velocity-grace-ms: 1000
     score: 5.0
     threshold: 9.0
     # Raised 2 → 3: a single air-clicked-face packet can come from a
     # chunk-reload / falling-block race; a sustained run is conclusive.
     min-streak: 3
+    # 2026-06-11: clicked-air positions that still TOUCH a solid block are
+    # skipped — that's the crystal-PvP / team-mining race (someone else broke
+    # the block between the client's click and our world read). A genuinely
+    # forged air-place floats with nothing adjacent and is still caught.
 
   # AntiKnockback-Sprint — three gates ALL required to flag:
   #  S0 damage event must have produced a server-side knockback (skips
