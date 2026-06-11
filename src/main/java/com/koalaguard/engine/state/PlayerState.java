@@ -112,6 +112,26 @@ public final class PlayerState {
     public volatile boolean sprinting, sneaking, usingItem;
     public volatile long usingItemSinceNanos;
 
+    /**
+     * Total MOVEMENT-class packets received this session (all four flavors —
+     * vanilla emits exactly one per client tick, so the long-run rate is a
+     * hard 20/s on the client's clock). Incremented on the netty thread
+     * BEFORE any drop/cancel logic — TimerCheck measures what the client
+     * SENT, not what survived the pipeline.
+     */
+    public final java.util.concurrent.atomic.AtomicLong movePacketCount
+            = new java.util.concurrent.atomic.AtomicLong();
+
+    // ── 1.21.2+ keyboard input mirror (PLAYER_INPUT, netty-written) ──
+    /** True once at least one PLAYER_INPUT packet decoded this session.
+     *  Input-based checks are gated on this so clients that never send it
+     *  (older protocol via ViaVersion, decode failure) are never evaluated. */
+    public volatile boolean inputSeen;
+    /** Bitmask of the most recent PLAYER_INPUT:
+     *  1=forward 2=backward 4=left 8=right 16=jump 32=shift 64=sprint. */
+    public volatile int inputMask;
+    public volatile long lastInputNanos;
+
     // ── per-tick environment exemptions (set by EngineTask before checks) ──
     public boolean exFlying, exVehicle, exGliding, exClimbing,
                    exLiquid, exLevitation, exSlowFalling, exRiptide,
