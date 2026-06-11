@@ -12,9 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Stamps every player with a transaction (Ping) each server tick. The echoed
  * Pong — handled in the capture listener — feeds {@link LagCompensator} (the
- * rolling-median RTT) and advances {@code confirmedTransactions}, which is the
- * authoritative tick clock TimerCheck compares against (server lag can never
- * be mistaken for a client timer because both sides use this same clock).
+ * rolling-median RTT) and advances {@code confirmedTransactions}, the
+ * authoritative server-side tick clock used for lag compensation.
  */
 public final class TransactionDriver extends BukkitRunnable {
 
