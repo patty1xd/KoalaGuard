@@ -117,8 +117,8 @@ public final class AimD extends SimCheck {
             // straight at a target they're already aimed at lands repeated
             // dead-on hits with zero mouse movement. Flagging that is a false
             // positive. Silent-aim is correctly owned by AimI (rotation vs
-            // movement desync), AimF (GCD) and SpoofedRotation, which CAN tell
-            // them apart. AimD stays strictly the snap-and-return signature.
+            // movement desync) and AimF (GCD), which CAN tell them apart.
+            // AimD stays strictly the snap-and-return signature.
             if (snap >= snapMin && err <= lockCone
                     && bestReturn <= returnEps) {
                 flagged = true;

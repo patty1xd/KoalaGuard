@@ -45,6 +45,12 @@ public final class ShieldBypassCheck extends SimCheck {
         long lastCycleAtkSeq = Long.MIN_VALUE;
         long lastBackstabNanos = Long.MIN_VALUE;
         final Deque<Double> cycleMs = new ArrayDeque<>();
+        /** Wall-clock stamp per sample (parallel to cycleMs) — lets the
+         *  statistic expire. Without expiry, 8 incidental swap-hit-swap
+         *  triplets collected over a whole SESSION could cluster under the
+         *  SD gate (mouse-wheel scroll detents are near machine-consistent)
+         *  and flag a legit player hours into play. */
+        final Deque<Long> cycleAtMs = new ArrayDeque<>();
     }
 
     private final Map<UUID, S> state = new ConcurrentHashMap<>();
@@ -127,14 +133,45 @@ public final class ShieldBypassCheck extends SimCheck {
             }
             if (after == null) continue;                  // swap-back not seen yet
 
+            // Scroll-through filter: a HELD_ITEM→attack→HELD_ITEM triplet is
+            // only a SWAP-BACK cycle if the post-attack slot RETURNS to the
+            // slot held before the cycle. A player scrolling the hotbar past
+            // a weapon (slot X→Y, hit, Y→Z) produces a triplet too — and
+            // mouse-wheel detents are near machine-consistent in timing, so
+            // those samples polluted the statistic. If we can see the slot
+            // held before the cycle and the after-swap does NOT return to it,
+            // it's a scroll, not auto-axe — skip the sample.
+            if (before.kind == PacketKind.HELD_ITEM && after.kind == PacketKind.HELD_ITEM) {
+                int priorSlot = -1;
+                for (int j = chrono.indexOf(before) - 1; j >= 0; j--) {
+                    CapturedPacket q = chrono.get(j);
+                    if (q.kind == PacketKind.HELD_ITEM) { priorSlot = q.intA; break; }
+                }
+                if (priorSlot >= 0 && after.intA != priorSlot) continue;
+            }
+
             double cycle = (after.recvNanos - before.recvNanos) / 1_000_000.0;
             if (cycle > 0 && cycle < 1000) {
                 s.cycleMs.addLast(cycle);
-                while (s.cycleMs.size() > cfgI("sample-cap", 30)) s.cycleMs.removeFirst();
+                s.cycleAtMs.addLast(System.currentTimeMillis());
+                while (s.cycleMs.size() > cfgI("sample-cap", 30)) {
+                    s.cycleMs.removeFirst();
+                    s.cycleAtMs.removeFirst();
+                }
             }
             if (atk.seq > newWatermark) newWatermark = atk.seq;
         }
         s.lastCycleAtkSeq = newWatermark;
+
+        // Expire stale samples: only cycles from the recent window count. A
+        // real auto-axe produces a dense cluster every engagement; incidental
+        // human triplets are sparse and now age out instead of accumulating.
+        long expiryMs = cfgL("sample-expiry-ms", 90_000L);
+        long cutoff = System.currentTimeMillis() - expiryMs;
+        while (!s.cycleAtMs.isEmpty() && s.cycleAtMs.peekFirst() < cutoff) {
+            s.cycleAtMs.removeFirst();
+            s.cycleMs.removeFirst();
+        }
 
         if (s.cycleMs.size() < cfgI("min-samples", 8)) return;
         double mean = MathUtil.average(s.cycleMs);

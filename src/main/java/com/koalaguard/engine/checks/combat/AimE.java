@@ -49,8 +49,19 @@ public final class AimE extends SimCheck {
     @Override
     public void onTick(CheckContext ctx) {
         if (ctx.unstableBasic()) return;
+        // The old gate skipped while the attacker had been damaged (<800 ms)
+        // or knocked back (<1000 ms). In a real fight BOTH are continuously
+        // true — being comboed refreshes them every hit — so the check that
+        // exists to catch silent aim was effectively BLIND for entire
+        // engagements ("aim cheats never get detected"). Neither event
+        // corrupts the measurement: the aim error is computed from the
+        // attacker's SENT rotation (packet-stamped) against the rewound
+        // victim box; taking a hit moves the attacker's body, not the
+        // truthfulness of their crosshair. Keep only a short velocity grace
+        // for the single tick where a fresh knockback can shear the eye
+        // position reconstruction.
         long now = System.currentTimeMillis();
-        if (now - ctx.data.lastVelocityMs < 1000 || now - ctx.data.lastDamageMs < 800) return;
+        if (now - ctx.data.lastVelocityMs < cfgL("velocity-grace-ms", 300L)) return;
 
         UUID id = ctx.data.getUuid();
         S s = state.computeIfAbsent(id, k -> new S());

@@ -156,6 +156,17 @@ public final class HoneypotCheck extends SimCheck {
                 a.setInvulnerable(true);
                 a.addScoreboardTag("kg_honeypot");
             });
+            // SEC-008: the stand is a REAL server entity — without this every
+            // nearby client receives its spawn packets, so a cheat's
+            // entity-list ESP on a DIFFERENT player can enumerate the trap
+            // (and an aura on a bystander can attack it, framing the wrong
+            // player). Hide it from everyone except the suspect; the 2.5 s
+            // lifetime makes a join-during-lifetime race irrelevant.
+            for (Player o : player.getWorld().getPlayers()) {
+                if (!o.getUniqueId().equals(player.getUniqueId())) {
+                    try { o.hideEntity(plugin, stand); } catch (Throwable ignored) { }
+                }
+            }
             h.stand = stand;
             h.standId = stand.getEntityId();
         } catch (Throwable t) {

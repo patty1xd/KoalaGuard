@@ -109,10 +109,28 @@ public final class AimI extends SimCheck {
         // leaving the sustained ground desync a real silent-aim still emits.
         if (!f.simGround) return;
         if (f.dYaw > cfgD("max-yaw-rate-deg", 12.0)) return;
+        // Ice / blue-ice / slime (slipperiness > 0.6): friction barely decays
+        // momentum, so the velocity vector keeps pointing the OLD way for many
+        // ticks while the camera turns — a huge legit residual. Skip.
+        if (f.groundSlipperiness > 0.61) return;
+        // Circle-strafe / orbit skip: the per-frame yaw-rate gate passes a
+        // sustained smooth orbit (~5-10°/tick around an opponent), but in an
+        // orbit the velocity continuously lags the turning yaw, inflating the
+        // residual with no cheat. If the camera has been turning steadily
+        // across the recent frames (mean |dYaw| over the last 6), don't sample.
+        double turnSum = 0; int turnN = 0;
+        for (var g : ctx.state.recentFrames(6)) { turnSum += g.dYaw; turnN++; }
+        if (turnN >= 3 && (turnSum / turnN) > cfgD("max-mean-turn-deg", 3.5)) return;
 
         UUID id = ctx.data.getUuid();
         S s = state.computeIfAbsent(id, k -> new S());
         if (f.tick == s.lastTick) return;
+        // Stale-series reset: samples from a PREVIOUS fight must not blend
+        // into this one — mixed-context statistics were a slow-burn FP.
+        if (s.lastTick != Long.MIN_VALUE
+                && f.tick - s.lastTick > cfgI("series-gap-ticks", 100)) {
+            s.residuals.clear();
+        }
         s.lastTick = f.tick;
 
         // Compute the residual modulo 45° between reported yaw and movement
@@ -134,6 +152,11 @@ public final class AimI extends SimCheck {
 
         double mean = MathUtil.average(s.residuals);
         double sd   = MathUtil.standardDeviation(s.residuals);
+        // Cap stays 10°: the folded silent-aim residual is ~uniform[0, 22.5°]
+        // (mean ≈ 11.25°), so any cap above ~11 would stop detecting the cheat
+        // outright. FP headroom comes from the ice / orbit / stale-series
+        // guards above, which remove the legit cases that used to drift the
+        // mean toward the cap — not from loosening the cap itself.
         double meanCap = cfgD("max-mean-residual", 10.0);
         double sdMin   = cfgD("min-sd-residual",   0.0);   // unused by default
 

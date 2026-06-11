@@ -69,11 +69,10 @@ public final class RotationCheck extends SimCheck {
         //
         // The previous "quantised aim" GCD analysis was removed: it was
         // false-positive prone on raw-input mice and specific sensitivities
-        // (the leftover signal the user kept hitting). The silent-aim job is
-        // now owned end-to-end by SpoofedRotationCheck (angular variance to
-        // target across many actions), which is the correct mechanism per
-        // Meteor's actual source code — Meteor sends an exact computed angle
-        // every tick with no jitter, so variance is the unambiguous signal.
+        // (the leftover signal the user kept hitting). Silent-aim detection is
+        // owned by the AimA-I family (rotation-vs-movement desync, lag-comp
+        // angular variance), so RotationCheck stays strictly the impossible-
+        // pitch / out-of-range-yaw / quantise-collapse detector.
         clean(ctx, 0.5);
     }
 }
